@@ -1,0 +1,13 @@
+{
+  "name": "sets-machine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SETS MACHINE: a self-evolving trading system that breeds grid-DCA strategies and paper-trades the survivors.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "python -m http.server 8000 --directory dist",
+    "data": "python tools/fetch_data.py"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SETS MACHINE · Self Evolving Trading System</title>
+<meta name="description" content="A genetic algorithm breeds grid-DCA strategies on real BTC candles, kills what fails out-of-sample and paper-trades the survivor. Live, in your browser.">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+
+  <header class="panel hdr">
+    <canvas id="logo" class="logo" aria-hidden="true"></canvas>
+    <div class="brand">
+      <h1>SETS <span>MACHINE</span></h1>
+      <div class="sub"><b>S</b>ELF <b>E</b>VOLVING <b>T</b>RADING <b>S</b>YSTEM · <span id="sym">BTCUSDT</span> · PAPER · NON-CUSTODIAL</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><label>GENERATION</label><b id="sGen">#0</b></div>
+      <div class="stat"><label>BACKTESTS</label><b id="sTested">0</b></div>
+      <div class="stat"><label>KILL RATE</label><b id="sKill" class="acc">0%</b></div>
+      <div class="stat"><label>SURVIVORS</label><b id="sSurv">0</b></div>
+    </div>
+    <div class="spark"><canvas id="spark" aria-hidden="true"></canvas><label>SURVIVORS / GEN</label></div>
+    <div class="clock"><b id="clock">--:--:--</b><span class="pill"><i></i><em id="lat">PAPER</em></span></div>
+  </header>
+
+  <nav class="panel bar" aria-label="Simulation controls">
+    <button id="bPlay" class="btn pri" aria-label="Pause">❚❚ PAUSE</button>
+    <button id="bStep" class="btn" title="Next generation (→)">STEP ›</button>
+    <div class="seg" role="group" aria-label="Speed">
+      <button class="btn" data-speed="1">1×</button><button class="btn" data-speed="2">2×</button><button class="btn" data-speed="4">4×</button><button class="btn" data-speed="8">8×</button>
+    </div>
+    <label class="seed">SEED <input id="seed" type="number" min="1" max="999999" inputmode="numeric"></label>
+    <button id="bSeed" class="btn" title="Restart with this seed">RESTART</button>
+    <button id="bRand" class="btn" title="Random seed">NEW SEED</button>
+    <span class="meta" id="meta"></span>
+  </nav>
+
+  <section class="row evo">
+    <div class="panel ringp">
+      <div class="ph"><h2>EVOLUTION LOOP</h2><span class="tag">SELF-REWRITING</span></div>
+      <div class="phs">OBSERVE → MUTATE → TEST → SELECT → DEPLOY</div>
+      <canvas id="ring" class="grow" role="img" aria-label="Current stage of the evolution loop"></canvas>
+    </div>
+    <div class="panel fitp">
+      <div class="ph"><h2>FITNESS · BEST OF GENERATION</h2><span class="r" id="fitNow"></span></div>
+      <div class="phs">TRAIN RETURN − 0.6 × DRAWDOWN · ELITES CARRY OVER, SO BEST NEVER FALLS</div>
+      <canvas id="fit" class="grow" role="img" aria-label="Best and mean fitness per generation"></canvas>
+      <div class="kv4">
+        <div><label>POPULATION</label><b id="fPop"></b></div>
+        <div><label>OFFSPRING / GEN</label><b id="fOff"></b></div>
+        <div><label>ELITE KEPT</label><b id="fElite"></b></div>
+        <div><label>Δ FITNESS · 10 GEN</label><b id="fDelta" class="acc"></b></div>
+      </div>
+      <div class="stageline"><span class="dot"></span><b id="stName"></b><span id="stText"></span></div>
+    </div>
+  </section>
+
+  <section class="panel meshp">
+    <div class="ph"><h2>GENE POOL · LIVE STRATEGY GRAPH</h2><div class="phase"><b id="phaseA"></b><span id="phaseB"></span></div></div>
+    <div class="phs">POSITION = GENES · SIZE = RANK · CLICK A NODE TO INSPECT ITS GENOME</div>
+    <div class="legend" id="legend"></div>
+    <canvas id="mesh" class="grow" role="img" aria-label="Population graph grouped by species"></canvas>
+    <div class="pf"><span>ONE NODE = ONE CONFIG · LINE = PARENT → CHILD · RING = BIRTH / DEATH</span><span id="meshCount"></span></div>
+  </section>
+
+  <section class="row trio">
+    <div class="panel genep">
+      <div class="ph"><h2 id="genomeTitle">GENOME · LIVE LEADER</h2><span class="r" id="genomeId"></span></div>
+      <div class="phs" id="genomeSub">DNA OF THE CONFIG THAT IS PAPER TRADING</div>
+      <div id="genes" class="genes"></div>
+      <div class="pf" id="genomeFoot"></div>
+    </div>
+    <div class="panel selp">
+      <div class="ph"><h2>NATURAL SELECTION</h2><span class="r" id="selGen"></span></div>
+      <div class="phs">WHO SURVIVES THIS GENERATION</div>
+      <div id="funnel" class="funnel"></div>
+      <div class="pf"><span>GATE <b>OOS RET &gt; 1% · DD &lt; 10% · ≥3 TRADES · WIN ≥ 50%</b></span></div>
+    </div>
+    <div class="panel kelp">
+      <div class="ph"><h2>KELLY SIZING</h2><span class="r" id="kN"></span></div>
+      <div class="kbig"><b id="kPct"></b><span>optimal bet fraction f*<br><em>g(f) = W·ln(1+fR) + (1−W)·ln(1−f)</em></span></div>
+      <canvas id="kelly" class="grow" role="img" aria-label="Kelly growth curve"></canvas>
+      <div class="kv2">
+        <div><label>WIN RATE W</label><b id="kW"></b></div>
+        <div><label>PAYOFF R</label><b id="kR"></b></div>
+        <div><label>HALF-KELLY</label><b id="kH" class="acc"></b></div>
+        <div><label>EDGE</label><b id="kE" class="acc"></b></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="row trade">
+    <div class="panel chartp">
+      <div class="ph"><h2>GRID ENGINE · <span class="acc" id="chSym">BTCUSDT</span> · PAPER</h2><span class="r" id="chState"></span></div>
+      <div class="phs" id="chCfg"></div>
+      <div class="ohlc" id="ohlc"></div>
+      <canvas id="chart" class="grow" role="img" aria-label="Paper trading replay on out-of-sample candles"></canvas>
+      <div class="kv6">
+        <div><label>AVG ENTRY</label><b id="cAvg"></b></div>
+        <div><label>TAKE PROFIT</label><b id="cTp" class="acc"></b></div>
+        <div><label>POSITION</label><b id="cPos"></b></div>
+        <div><label>UNREALIZED</label><b id="cUnr"></b></div>
+        <div><label>REALIZED</label><b id="cReal"></b></div>
+        <div><label>EQUITY</label><b id="cEq"></b></div>
+      </div>
+    </div>
+    <div class="panel gridp">
+      <div class="ph"><h2>ORDER GRID</h2><span class="badge" id="gridBadge">PRE-COMMITTED</span></div>
+      <div class="gtable">
+        <div class="gth"><span>LVL</span><span>PRICE</span><span>SIZE</span><span>STATUS</span></div>
+        <div id="grows"></div>
+      </div>
+      <div class="sig" id="sig"></div>
+      <div class="logh">EXECUTION LOG</div>
+      <div id="log" class="log" aria-live="off"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Paper trading on historical Binance candles. No exchange connection, no keys, no real orders. Not financial advice.
+    · MIT licensed
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
