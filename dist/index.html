@@ -22,8 +22,14 @@
       <div class="stat"><label>BACKTESTS</label><b id="sTested">0</b></div>
       <div class="stat"><label>KILL RATE</label><b id="sKill" class="acc">0%</b></div>
       <div class="stat"><label>SURVIVORS</label><b id="sSurv">0</b></div>
-      <div class="stat"><label>FWD BARS</label><b id="sFwdBars">—</b></div>
-      <div class="stat"><label>COHORT vs B&amp;H</label><b id="sFwdEdge">—</b></div>
+      <div class="stat"><label>FWD BARS · <span id="fwdSym">BTC</span></label><b id="sFwdBars">—</b></div>
+      <div class="stat estat"><label>COHORT vs B&amp;H · TAP TO SWITCH</label>
+        <b class="mstrip" id="mStrip">
+          <button type="button" class="mseg" data-edge-sym="BTC" title="Switch to BTCUSDT"><em>BTC</em><i id="eBTC">—</i></button>
+          <button type="button" class="mseg" data-edge-sym="ETH" title="Switch to ETHUSDT"><em>ETH</em><i id="eETH">—</i></button>
+          <button type="button" class="mseg" data-edge-sym="SOL" title="Switch to SOLUSDT"><em>SOL</em><i id="eSOL">—</i></button>
+        </b>
+      </div>
     </div>
     <div class="spark"><canvas id="spark" aria-hidden="true"></canvas><label>SURVIVORS / GEN</label></div>
     <div class="clock"><b id="clock">--:--:--</b><span class="pill"><i></i><em id="lat">PAPER</em></span></div>
@@ -49,6 +55,7 @@
       <div class="ph"><h2>EVOLUTION LOOP</h2><span class="tag">SELF-REWRITING</span></div>
       <div class="phs">OBSERVE → MUTATE → TEST → SELECT → DEPLOY</div>
       <canvas id="ring" class="grow" role="img" aria-label="Current stage of the evolution loop"></canvas>
+      <div class="turnover" id="turnover" aria-label="Leader turnover by generation"></div>
     </div>
     <div class="panel fitp">
       <div class="ph"><h2>FITNESS · BEST OF GENERATION</h2><span class="r" id="fitNow"></span></div>
@@ -66,12 +73,30 @@
 
   <section class="panel gate">
     <div class="ph"><h2>GATE BOARD · OUT-OF-SAMPLE SURVIVORS</h2><span class="r" id="gateCount"></span></div>
-    <div class="phs">EVERY ROW PASSED THE OOS GATE · CLICK A ROW TO INSPECT ITS GENOME · ESC RETURNS TO THE LEADER</div>
+    <div class="phs">EVERY ROW PASSED THE OOS GATE · CLICK A ROW TO INSPECT · CLICK A COLUMN TO SORT · ESC RETURNS TO THE LEADER</div>
+    <div class="gbtools">
+      <div class="seg" id="gbFam" role="group" aria-label="Filter by species">
+        <button type="button" class="btn on" data-fam="-1">ALL</button>
+        <button type="button" class="btn" data-fam="0">MOMENTUM</button>
+        <button type="button" class="btn" data-fam="1">MEAN REVERT</button>
+        <button type="button" class="btn" data-fam="2">VOL BREAKOUT</button>
+        <button type="button" class="btn" data-fam="3">RANGE GRID</button>
+      </div>
+      <span class="gbsortlab" id="gateSortLab"></span>
+    </div>
     <div class="gtable gbtbl">
-      <div class="gbrow"><span>ID</span><span>SPECIES</span><span>FIT</span><span>OOS</span><span>DD</span><span>×</span><span>ROLE</span></div>
+      <div class="gbrow" id="gateHead" role="row">
+        <button type="button" class="gbs" data-sort="id">ID</button>
+        <button type="button" class="gbs" data-sort="family">SPECIES</button>
+        <button type="button" class="gbs sorted" data-sort="fit" aria-sort="descending">FIT</button>
+        <button type="button" class="gbs" data-sort="oos">OOS</button>
+        <button type="button" class="gbs" data-sort="dd">DD</button>
+        <button type="button" class="gbs" data-sort="trades">×</button>
+        <span class="gbs rolecol">ROLE</span>
+      </div>
       <div id="gateRows"></div>
     </div>
-    <div class="pf"><span>SORTED BY TRAIN FITNESS · <b>FIT = OOS-BLIND TRAIN SCORE</b></span><span id="gateMeta"></span></div>
+    <div class="pf"><span><b>FIT</b> = OOS-BLIND TRAIN SCORE · SORT IS STABLE</span><span id="gateMeta"></span></div>
   </section>
 
   <section class="row trio">
@@ -105,6 +130,10 @@
       <div class="ph"><h2>FORWARD TEST · FROZEN COHORT vs <span class="acc">BUY &amp; HOLD</span></h2><span class="r" id="fwStatus">CONNECTING…</span></div>
       <div class="phs" id="fwSub">GENOMES FROZEN AT T0 · NO RE-EVOLUTION · ONLY NEW BARS COUNT</div>
       <canvas id="fwChart" class="grow" role="img" aria-label="Forward equity curves of frozen survivors versus buy and hold"></canvas>
+      <div class="ddwrap">
+        <div class="ddbar"><span>UNDERWATER · DRAWDOWN FROM PEAK</span><b id="fwDDMax">—</b></div>
+        <canvas id="fwDD" role="img" aria-label="Drawdown from peak for the selected forward runner versus buy and hold"></canvas>
+      </div>
       <div class="pf"><span id="fwSince">—</span><span id="fwBars"></span></div>
     </div>
     <div class="panel fwt">

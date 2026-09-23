@@ -2,7 +2,7 @@
 
 ## Automated tests
 
-`node --test tests/*.test.mjs` passes all 18 tests (Node 24):
+`node --test tests/*.test.mjs` passes all 19 tests (Node 24):
 
 - **Bundled data:** 2 399 candles (BTC, ETH, SOL), all exactly one hour apart, every row satisfies low ≤ open/close ≤ high.
 - **Indicators:** rolling mean and breakout high are causal. A spike at bar 30 is invisible at bar 29, and the breakout high excludes the current bar.
@@ -12,13 +12,14 @@
 - **Genome bounds:** 500 heavy mutations never leave a gene's range; integer genes stay integers.
 - **Determinism:** two runs with the same seed produce identical histories. All four species survive 12 generations, and best fitness never decreases.
 - **Reproducibility:** re-running the leader's backtest gives exactly the stored out-of-sample metrics.
+- **Leader turnover:** every generation records `leaderId` for the turnover strip.
 - **Snapshots:** each market's frozen cohort is well formed — genomes in bounds, unique ids, T0 = last bundled candle + 1 h.
 - **Forward test:** empty before T0; curve matches per-runner equities and fee-adjusted buy & hold; bots never step warmup bars; fill events are collected with bar times and replay deterministically.
 
 ## Browser checks
 
 - Served with `python -m http.server --directory dist`. All modules, data, fonts and icons return 200. The root `index.html` forwards to `dist/` for GitHub Pages.
-- Desktop, 1280 × 900: all panels render — evolution, gate board, genome/selection/Kelly, forward test with cohort inspector. Inspect-on-click (gate-board row → "GENOME · INSPECTING", Esc returns to leader), cohort-row click (order grid + forward fills), pause, step, speed and the BTC/ETH/SOL toggle were exercised. No console errors on any market.
+- Desktop, 1280 × 900: all panels render — evolution + leader turnover, gate board (column sort, species filter), genome/selection/Kelly, forward test with equity + underwater curves and cohort inspector. Gate sort/filter, inspect-on-click, edge strip (BTC/ETH/SOL, tap to switch), cohort-row click, pause, step and speed were exercised. No console errors on any market.
 - Phone, 390 × 844: panels stack and `scrollWidth` equals the viewport (390 px), so nothing scrolls sideways.
 - The README screenshots and GIFs were captured from the running app (seed 2026, 40 generations warmed up) with headless Chrome. No page errors were reported during capture.
 

@@ -110,3 +110,17 @@ test('leader backtest is reproducible', () => {
   assert.ok(L);
   assert.deepEqual(backtest(L.genome, s, e.valFrom, e.valTo), L.val);
 });
+
+test('history records leaderId each generation for turnover', () => {
+  const s = makeSeries(CANDLES);
+  const e = new Evolution(s, { seed: 7 });
+  assert.equal(e.history.length, 1);
+  assert.ok('leaderId' in e.history[0]);
+  for (let k = 0; k < 8; k++) e.step();
+  assert.equal(e.history.length, 9);
+  for (const h of e.history) {
+    if (h.leaderId == null) continue;
+    assert.ok(Number.isInteger(h.leaderId));
+  }
+  if (e.leader) assert.equal(e.history[e.history.length - 1].leaderId, e.leader.id);
+});

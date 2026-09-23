@@ -138,7 +138,7 @@ export class Evolution {
       leader: this.leader, promoted: !!leader && (!prev || prev.id !== leader.id),
       prevLeader: prev,
     };
-    this.history.push({ gen: rep.gen, best: rep.best, mean: rep.mean, survivors: rep.survivors });
+    this.history.push({ gen: rep.gen, best: rep.best, mean: rep.mean, survivors: rep.survivors, leaderId: this.leader ? this.leader.id : null });
     this.last = rep;
     return rep;
   }

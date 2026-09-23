@@ -12,7 +12,7 @@ import { signal, FAMILIES } from './engine/bot.js';
 import { Evolution, GENES } from './engine/evolution.js';
 import { fetchCandles, runForward } from './engine/forward.js';
 import * as D from './ui/draw.js';
-import { drawForward, FW_COLORS, BH_COLOR } from './ui/forward.js';
+import { drawForward, drawUnderwater, maxUnderwater, FW_COLORS, BH_COLOR } from './ui/forward.js';
 
 const TAPE = {
   BTC: { candles: BTC_CANDLES, meta: BTC_META, snapshot: BTC_SNAP },
@@ -34,6 +34,18 @@ const q = new URLSearchParams(location.search);
 
 let symKey, CANDLES, META, S, snapshot; // current tape — rebound by loadTape()
 let fw = { status: 'loading', at: 0 }, fwBusy = false, fwQueued = false, fwSel = 0;
+let fwGen = 0;
+const runs = { BTC: null, ETH: null, SOL: null }; // { run, live, at, err } per market
+const edges = { BTC: null, ETH: null, SOL: null }; // { pp, bars } per market
+const GB_SORT = {
+  id: { def: 1, label: 'ID' },
+  family: { def: 1, label: 'SPECIES' },
+  fit: { def: -1, label: 'FIT' },
+  oos: { def: -1, label: 'OOS' },
+  dd: { def: 1, label: 'DD' },
+  trades: { def: -1, label: '×' },
+};
+let gbSort = { key: 'fit', dir: -1 }, gbFam = -1;
 
 function loadTape(key) {
   const t = TAPE[key] || TAPE.BTC;
@@ -42,15 +54,23 @@ function loadTape(key) {
   META = t.meta;
   snapshot = t.snapshot;
   S = makeSeries(CANDLES);
-  fw = { status: 'loading', at: 0 };
   fwSel = 0;
+  const cached = runs[symKey];
+  if (cached && cached.run) {
+    fw = { status: cached.live ? 'live' : 'bundled only', run: cached.run, at: cached.at, err: cached.err || null };
+  } else {
+    fw = { status: 'loading', at: 0 };
+  }
   document.querySelectorAll('[data-sym]').forEach((b) => b.classList.toggle('on', b.dataset.sym === symKey));
+  document.querySelectorAll('[data-edge-sym]').forEach((b) => b.classList.toggle('on', b.dataset.edgeSym === symKey));
   $('sym').textContent = META.symbol;
+  setText($('fwdSym'), symKey);
   setText($('meta'), `${META.symbol} ${META.interval} · ${fmt(META.count)} candles · ${tapeTime(META.from)} → ${tapeTime(META.to)} UTC · train 70% / out-of-sample 30%`);
+  renderEdgeStrip();
 }
 
 const cv = {};
-['logo', 'spark', 'ring', 'fit', 'kelly', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
+['logo', 'spark', 'ring', 'fit', 'kelly', 'fwChart', 'fwDD'].forEach((id) => { cv[id] = D.sized($(id)); });
 
 let st; // whole simulation state; rebuilt on restart
 
@@ -113,13 +133,39 @@ function stageText(stage) {
 
 // Live table of every config that currently passes the out-of-sample gate.
 // Rows feed the Genome panel via st.inspect — the old gene-pool canvas in DOM form.
+const gbVal = (ind, key) => {
+  if (key === 'id') return ind.id;
+  if (key === 'family') return ind.genome.family;
+  if (key === 'oos') return ind.val.ret;
+  if (key === 'dd') return ind.val.maxDD;
+  if (key === 'trades') return ind.val.trades;
+  return ind.fit;
+};
+
+function gatePassers() {
+  const evo = st.evo;
+  const all = evo.pop.filter((x) => x.pass);
+  const pass = gbFam < 0 ? all : all.filter((x) => x.genome.family === gbFam);
+  const { key, dir } = gbSort;
+  pass.sort((a, b) => dir * (gbVal(a, key) - gbVal(b, key)));
+  return { all, pass };
+}
+
 function renderGateBoard() {
   const evo = st.evo;
-  const pass = evo.pop.filter((x) => x.pass);
-  setText($('gateCount'), `${pass.length} / ${evo.N} PASSED`);
+  const { all, pass } = gatePassers();
+  setText($('gateCount'), gbFam < 0 ? `${pass.length} / ${evo.N} PASSED` : `${pass.length} / ${all.length} SHOWN`);
   setText($('gateMeta'), `GEN ${st.rep.gen} · BORN ${fmt(evo.born)} · KILLED ${fmt(evo.killed)}`);
+  setText($('gateSortLab'), `SORT ${GB_SORT[gbSort.key].label} ${gbSort.dir < 0 ? '↓ DESC' : '↑ ASC'}`);
+  document.querySelectorAll('#gateHead [data-sort]').forEach((b) => {
+    const on = b.dataset.sort === gbSort.key;
+    b.classList.toggle('sorted', on);
+    b.setAttribute('aria-sort', on ? (gbSort.dir < 0 ? 'descending' : 'ascending') : 'none');
+  });
   if (!pass.length) {
-    setHTML($('gateRows'), '<div class="gbempty">No config has passed the out-of-sample gate yet.</div>');
+    setHTML($('gateRows'), all.length
+      ? '<div class="gbempty">No config matches this filter.</div>'
+      : '<div class="gbempty">No config has passed the out-of-sample gate yet.</div>');
     return;
   }
   const leadId = st.shown ? st.shown.id : -1;
@@ -137,6 +183,56 @@ function renderGateBoard() {
       `<span class="grole">${role}</span></div>`
     );
   }).join(''));
+}
+
+// Reigns of past leaders derived from evo.history[].leaderId.
+function renderTurnover() {
+  const reigns = [];
+  for (const h of st.evo.history) {
+    if (h.leaderId == null) continue;
+    const last = reigns[reigns.length - 1];
+    if (last && last.id === h.leaderId) last.to = h.gen;
+    else reigns.push({ id: h.leaderId, from: h.gen, to: h.gen });
+  }
+  if (!reigns.length) {
+    setHTML($('turnover'), '<label>LEADERS</label><span class="tvnone">NO LEADER YET</span>');
+    return;
+  }
+  const show = reigns.slice(-5);
+  setHTML(
+    $('turnover'),
+    '<label>LEADERS</label>' +
+      show
+        .map((r, i) => {
+          const cur = i === show.length - 1;
+          const span = r.from === r.to ? `#${r.from}` : `#${r.from}–${cur ? 'NOW' : r.to}`;
+          return `<span class="tchip${cur ? ' now' : ''}"><b>g${r.id}</b> ${span}</span>`;
+        })
+        .join('<i>→</i>'),
+  );
+}
+
+// Cross-market cohort edge (best runner vs B&H), pp.
+function edgeOf(run) {
+  if (!run || !run.curve.length) return { pp: null, bars: run ? run.bars : 0 };
+  let best = -Infinity;
+  for (const r of run.runners) best = Math.max(best, r.equity ?? run.startCash);
+  const pp = (best / run.startCash - 1 - (run.bh / run.startCash - 1)) * 100;
+  return { pp, bars: run.bars };
+}
+
+function renderEdgeStrip() {
+  for (const key of ['BTC', 'ETH', 'SOL']) {
+    const el = $('e' + key);
+    if (!el) continue;
+    const e = edges[key];
+    const txt = !e || e.pp == null ? '—' : (e.pp >= 0 ? '+' : '−') + Math.abs(e.pp).toFixed(1) + 'pp';
+    setText(el, txt);
+    el.classList.toggle('pos', !!e && e.pp != null && e.pp >= 0);
+    el.classList.toggle('neg', !!e && e.pp != null && e.pp < 0);
+    const seg = el.closest('[data-edge-sym]');
+    if (seg) seg.classList.toggle('on', key === symKey);
+  }
 }
 
 function render() {
@@ -165,6 +261,7 @@ function render() {
   setText($('stName'), D.STAGES[stage]);
   setText($('stText'), stageText(stage));
   renderGateBoard();
+  renderTurnover();
   renderGenome(); renderSelection(stage, sp); renderKelly(t);
 }
 
@@ -235,19 +332,65 @@ function frame(now) {
 
 // ---------------- forward test (frozen cohort on live bars) ----------------
 function renderFwHeader(run) {
-  const bars = $('sFwdBars'), edge = $('sFwdEdge');
-  if (!run || !run.curve.length) {
-    setText(bars, run ? '0' : '—');
-    setText(edge, '—');
-    edge.classList.remove('acc');
-    return;
+  const bars = $('sFwdBars');
+  if (!run || !run.curve.length) setText(bars, run ? '0' : '—');
+  else setText(bars, String(run.bars));
+}
+
+// Fetch one market's tape and replay its frozen cohort. Returns { run, live, err }.
+async function computeRun(key) {
+  const t = TAPE[key];
+  const mySnap = t.snapshot;
+  if (!mySnap) return null;
+  const warmup = mySnap.warmupBars || 220;
+  const start = mySnap.forwardFrom - warmup * 3600;
+  const [live, bundled] = await Promise.all([
+    fetchCandles({ symbol: mySnap.symbol, startTime: start * 1000 }).catch(() => []),
+    Promise.resolve(t.candles.filter((c) => c[0] >= start)),
+  ]);
+  const past = bundled.filter((c) => c[0] >= mySnap.forwardFrom).length;
+  const candles = live.length ? mergeCandles(bundled, live) : bundled;
+  const run = runForward(mySnap, candles, START_CASH);
+  return {
+    run,
+    live: live.length > 0,
+    past,
+    err: live.length ? null : past ? 'Binance unreachable — showing bundled bars only' : null,
+    at: Date.now(),
+    symbol: mySnap.symbol,
+  };
+}
+
+async function refreshForward() {
+  if (fwBusy) { fwQueued = true; return; }
+  fwBusy = true;
+  const gen = ++fwGen;
+  const myKey = symKey;
+  try {
+    if (runs[myKey] == null || !runs[myKey].run) fw = { ...fw, status: 'fetching…', run: null };
+    const keys = ['BTC', 'ETH', 'SOL'];
+    const results = await Promise.all(keys.map(async (key) => {
+      try { return [key, await computeRun(key)]; }
+      catch { return [key, null]; }
+    }));
+    if (gen !== fwGen) { fwBusy = false; return; } // a newer refresh owns the UI
+    for (const [key, res] of results) {
+      if (!res) continue;
+      runs[key] = res;
+      edges[key] = edgeOf(res.run);
+    }
+    renderEdgeStrip();
+    const res = runs[myKey];
+    if (symKey === myKey && res) {
+      const status = res.live ? 'live' : res.past ? 'bundled only' : 'waiting';
+      fw = { status, run: res.run, at: res.at, symbol: res.symbol, err: res.err };
+    }
+  } catch (e) {
+    if (symKey === myKey) fw = { ...fw, status: 'error', err: String(e.message || e), at: Date.now() };
   }
-  setText(bars, String(run.bars));
-  let best = -Infinity;
-  for (const r of run.runners) best = Math.max(best, r.equity);
-  const pp = (best / run.startCash - 1 - (run.bh / run.startCash - 1)) * 100;
-  setText(edge, (pp >= 0 ? '+' : '−') + Math.abs(pp).toFixed(1) + 'pp');
-  edge.classList.toggle('acc', pp >= 0);
+  fwBusy = false;
+  if (fwQueued) { fwQueued = false; refreshForward(); return; }
+  renderForward();
 }
 
 // One frozen survivor's live order grid + its forward-tape fills.
@@ -295,36 +438,6 @@ function renderFwInspector(run, k) {
   );
 }
 
-async function refreshForward() {
-  if (!snapshot) return;
-  if (fwBusy) { fwQueued = true; return; }
-  fwBusy = true;
-  const myKey = symKey, mySnap = snapshot;
-  try {
-    fw = { ...fw, status: 'fetching…', run: null };
-    const warmup = mySnap.warmupBars || 220;
-    const start = mySnap.forwardFrom - warmup * 3600;
-    const [live, bundled] = await Promise.all([
-      fetchCandles({ symbol: mySnap.symbol, startTime: start * 1000 }).catch(() => []),
-      Promise.resolve(CANDLES.filter((c) => c[0] >= start)),
-    ]);
-    const past = bundled.filter((c) => c[0] >= mySnap.forwardFrom).length;
-    const candles = live.length ? mergeCandles(bundled, live) : bundled;
-    const run = runForward(mySnap, candles, START_CASH);
-    if (symKey !== myKey) return; // market switched mid-fetch — a queued run owns the UI now
-    fw = {
-      status: live.length ? 'live' : past ? 'bundled only' : 'waiting',
-      run, at: Date.now(), symbol: mySnap.symbol,
-      err: live.length ? null : 'Binance unreachable — showing bundled bars only',
-    };
-  } catch (e) {
-    if (symKey === myKey) fw = { ...fw, status: 'error', err: String(e.message || e), at: Date.now() };
-  }
-  fwBusy = false;
-  if (fwQueued) { fwQueued = false; refreshForward(); return; }
-  renderForward();
-}
-
 // keep bundled warmup bars and splice live bars on top (live wins on overlap)
 function mergeCandles(base, live) {
   const byT = new Map();
@@ -345,12 +458,18 @@ function renderForward() {
     setText(stEl, 'NO SNAPSHOT');
     setHTML($('fwSub'), 'run <b>node tools/make_snapshot.mjs</b> to freeze a cohort');
     drawForward(cv.fwChart, { curve: null });
+    drawUnderwater(cv.fwDD, { curve: null, k: -1 });
+    setText($('fwDDMax'), '—');
     return;
   }
   if (!snapshot || !fw.run) {
     setText(stEl, fw.status === 'error' ? 'ERROR' : 'CONNECTING…');
     if (fw.err) setHTML($('fwSub'), fw.err);
-    if (!fw.run) drawForward(cv.fwChart, { curve: null });
+    if (!fw.run) {
+      drawForward(cv.fwChart, { curve: null });
+      drawUnderwater(cv.fwDD, { curve: null, k: -1 });
+      setText($('fwDDMax'), '—');
+    }
     return;
   }
   const run = fw.run;
@@ -366,6 +485,14 @@ function renderForward() {
   drawForward(cv.fwChart, { curve: run.curve, startCash: run.startCash, runners: run.runners, bhColor: BH_COLOR });
   const sel = clamp(fwSel, 0, run.runners.length - 1);
   fwSel = sel;
+  drawUnderwater(cv.fwDD, { curve: run.curve, startCash: run.startCash, k: sel, runners: run.runners, bhColor: BH_COLOR });
+  if (run.curve.length >= 2) {
+    const r = run.runners[sel];
+    const selDD = maxUnderwater(run.curve.map((p) => p.eqs[sel]));
+    const bhDD = maxUnderwater(run.curve.map((p) => p.bh));
+    const ddp = (v) => (Math.abs(v) < 0.0005 ? '0.0' : (v * 100).toFixed(1)) + '%';
+    setText($('fwDDMax'), r ? `MAX DD · g${r.sur.id} ${ddp(selDD)} · B&H ${ddp(bhDD)}` : '—');
+  } else setText($('fwDDMax'), '—');
   // cohort table — rows are click targets for the inspector
   const rows = run.runners.map((r, k) => {
     const bot = r.bot, col = FW_COLORS[k % FW_COLORS.length];
@@ -432,6 +559,21 @@ $('gateRows').addEventListener('keydown', (e) => {
   e.preventDefault();
   inspectGateRow(e);
 });
+$('gateHead').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sort]');
+  if (!b) return;
+  const key = b.dataset.sort;
+  if (gbSort.key === key) gbSort.dir *= -1;
+  else gbSort = { key, dir: GB_SORT[key].def };
+  renderGateBoard();
+});
+$('gbFam').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fam]');
+  if (!b) return;
+  gbFam = +b.dataset.fam;
+  document.querySelectorAll('#gbFam [data-fam]').forEach((x) => x.classList.toggle('on', +x.dataset.fam === gbFam));
+  renderGateBoard();
+});
 $('fwRows').addEventListener('click', (e) => {
   const row = e.target.closest('[data-idx]');
   if (!row) return;
@@ -447,14 +589,16 @@ $('fwRows').addEventListener('keydown', (e) => {
   renderForward();
 });
 document.querySelectorAll('[data-speed]').forEach((b) => { b.onclick = () => setSpeed(+b.dataset.speed); });
-document.querySelectorAll('[data-sym]').forEach((b) => {
-  b.onclick = () => {
-    const key = b.dataset.sym;
-    if (key === symKey || !TAPE[key]) return;
-    loadTape(key);
-    restart(st ? st.seed : 2026, 0);
-    refreshForward();
-  };
+function switchMarket(key) {
+  if (key === symKey || !TAPE[key]) return;
+  loadTape(key);
+  restart(st ? st.seed : 2026, 0);
+  refreshForward();
+}
+document.querySelectorAll('[data-sym]').forEach((b) => { b.onclick = () => switchMarket(b.dataset.sym); });
+$('mStrip').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-edge-sym]');
+  if (b) switchMarket(b.dataset.edgeSym);
 });
 $('bSeed').onclick = () => restart(clamp(Math.round(+$('seed').value) || 1, 1, 999999));
 $('bRand').onclick = () => restart(1 + Math.floor(Math.random() * 999999));
@@ -482,6 +626,7 @@ window.SETS = {
   get forward() { return fw; },
   get snapshot() { return snapshot; },
   get symbol() { return symKey; },
+  get edges() { return edges; },
   step, setSpeed, setRunning, restart, advance(dt) { update(dt); render(); },
   refreshForward,
 };
