@@ -1,4 +1,4 @@
-// Long-only grid-DCA bot. The same class runs the backtests and the paper-trading replay,
+// Long-only grid-DCA bot. The same class runs the backtests and the forward paper test,
 // so what the dashboard shows is exactly what the fitness function measured.
 
 import { rolling, zscore } from './series.js';

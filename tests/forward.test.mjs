@@ -70,6 +70,16 @@ test('runForward: curve matches bots and buy & hold, deterministic', () => {
   assert.deepEqual(a.curve, b.curve);
   // curve rows align with runner count
   for (const row of a.curve) assert.equal(row.eqs.length, snap.survivors.length);
+  // per-runner fill log: collected with bar times, also deterministic
+  a.runners.forEach((r, k) => {
+    assert.ok(Array.isArray(r.events));
+    assert.deepEqual(r.events, b.runners[k].events);
+    for (const e of r.events) {
+      assert.ok(['BUY', 'TP', 'STOP'].includes(e.type));
+      assert.ok(Number.isFinite(e.t));
+      assert.ok(e.t >= snap.forwardFrom, 'event logged before T0');
+    }
+  });
   // buy & hold: same fee-adjusted entry as the bots
   const s = makeSeries(candles);
   const bhQty = (10000 * (1 - FEE)) / s.open[warm];

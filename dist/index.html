@@ -22,6 +22,8 @@
       <div class="stat"><label>BACKTESTS</label><b id="sTested">0</b></div>
       <div class="stat"><label>KILL RATE</label><b id="sKill" class="acc">0%</b></div>
       <div class="stat"><label>SURVIVORS</label><b id="sSurv">0</b></div>
+      <div class="stat"><label>FWD BARS</label><b id="sFwdBars">—</b></div>
+      <div class="stat"><label>COHORT vs B&amp;H</label><b id="sFwdEdge">—</b></div>
     </div>
     <div class="spark"><canvas id="spark" aria-hidden="true"></canvas><label>SURVIVORS / GEN</label></div>
     <div class="clock"><b id="clock">--:--:--</b><span class="pill"><i></i><em id="lat">PAPER</em></span></div>
@@ -73,7 +75,7 @@
   <section class="row trio">
     <div class="panel genep">
       <div class="ph"><h2 id="genomeTitle">GENOME · LIVE LEADER</h2><span class="r" id="genomeId"></span></div>
-      <div class="phs" id="genomeSub">DNA OF THE CONFIG THAT IS PAPER TRADING</div>
+      <div class="phs" id="genomeSub">DNA OF THE CURRENT LEADER · CHOSEN BY THE OUT-OF-SAMPLE GATE</div>
       <div id="genes" class="genes"></div>
       <div class="pf" id="genomeFoot"></div>
     </div>
@@ -96,33 +98,6 @@
     </div>
   </section>
 
-  <section class="row trade">
-    <div class="panel chartp">
-      <div class="ph"><h2>GRID ENGINE · <span class="acc" id="chSym">BTCUSDT</span> · PAPER</h2><span class="r" id="chState"></span></div>
-      <div class="phs" id="chCfg"></div>
-      <div class="ohlc" id="ohlc"></div>
-      <canvas id="chart" class="grow" role="img" aria-label="Paper trading replay on out-of-sample candles"></canvas>
-      <div class="kv6">
-        <div><label>AVG ENTRY</label><b id="cAvg"></b></div>
-        <div><label>TAKE PROFIT</label><b id="cTp" class="acc"></b></div>
-        <div><label>POSITION</label><b id="cPos"></b></div>
-        <div><label>UNREALIZED</label><b id="cUnr"></b></div>
-        <div><label>REALIZED</label><b id="cReal"></b></div>
-        <div><label>EQUITY</label><b id="cEq"></b></div>
-      </div>
-    </div>
-    <div class="panel gridp">
-      <div class="ph"><h2>ORDER GRID</h2><span class="badge" id="gridBadge">PRE-COMMITTED</span></div>
-      <div class="gtable">
-        <div class="gth"><span>LVL</span><span>PRICE</span><span>SIZE</span><span>STATUS</span></div>
-        <div id="grows"></div>
-      </div>
-      <div class="sig" id="sig"></div>
-      <div class="logh">EXECUTION LOG</div>
-      <div id="log" class="log" aria-live="off"></div>
-    </div>
-  </section>
-
   <section class="row fwd">
     <div class="panel fwdp">
       <div class="ph"><h2>FORWARD TEST · FROZEN COHORT vs <span class="acc">BUY &amp; HOLD</span></h2><span class="r" id="fwStatus">CONNECTING…</span></div>
@@ -132,17 +107,21 @@
     </div>
     <div class="panel fwt">
       <div class="ph"><h2>COHORT · LIVE PAPER</h2><button id="fwRefresh" class="btn" title="Refetch candles and replay">REFRESH</button></div>
-      <div class="phs">EACH ROW IS ONE FROZEN GENOME ON LIVE HOURLY CANDLES</div>
+      <div class="phs">CLICK A ROW TO INSPECT ITS LIVE ORDER GRID AND FORWARD FILLS</div>
       <div class="gtable fwtbl">
         <div class="gth fwrow"><span>ID</span><span>SPECIES</span><span>RET</span><span>DD</span><span>×</span><span>STATE</span></div>
         <div id="fwRows"></div>
       </div>
+      <div class="logh" id="fwInspH">ORDER GRID</div>
+      <div id="fwInsp" class="fwins" aria-live="off"></div>
+      <div class="logh">EXECUTION · FORWARD FILLS ONLY</div>
+      <div id="fwEv" class="log" aria-live="off"></div>
       <div class="pf"><span>ENTRY FEE 0.04% · SAME <b>GridBot</b> AS THE BACKTEST</span><span id="fwPrice"></span></div>
     </div>
   </section>
 
   <footer class="foot">
-    Paper trading on historical Binance candles + live forward bars from Binance's public API. No exchange connection, no keys, no real orders. Not financial advice.
+    Evolution runs on historical Binance candles; the forward test paper-trades frozen survivors on live bars from Binance's public API. No exchange connection, no keys, no real orders. Not financial advice.
     · MIT licensed
   </footer>
 </main>

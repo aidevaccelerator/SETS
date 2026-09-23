@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "SETS MACHINE: a self-evolving trading system that breeds grid-DCA strategies and paper-trades the survivors.",
+  "description": "SETS MACHINE: a self-evolving trading system that breeds grid-DCA strategies and forward-tests frozen survivors against buy & hold.",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "start": "python -m http.server 8000 --directory dist",

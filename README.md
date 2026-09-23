@@ -5,7 +5,7 @@
 # SETS MACHINE
 ### Self Evolving Trading System
 
-A genetic algorithm breeds grid-DCA trading strategies on real BTC candles, kills everything that fails on data it has never seen, and paper-trades the survivor. Live, in your browser.
+A genetic algorithm breeds grid-DCA trading strategies on real BTC, ETH and SOL candles, kills everything that fails on data it has never seen, then freezes the survivors and paper-trades them on live bars against buy & hold. Live, in your browser.
 
 [**Run it locally →**](#run-locally) · [How it works](#how-it-works) · [Honest results](#honest-results) · [Promo video](docs/media/sets-machine-promo.mp4)
 
@@ -17,24 +17,25 @@ A genetic algorithm breeds grid-DCA trading strategies on real BTC candles, kill
 
 ## Watch it evolve
 
-Every 4.8 seconds a new generation is born. Immigrants and offspring appear in the gene pool, get backtested, face the out-of-sample gate, and everything that is not an elite dies. The best config that survives the gate takes over the paper grid.
+Every 4.8 seconds a new generation is born. Immigrants and offspring appear in the gene pool, get backtested, face the out-of-sample gate, and everything that is not an elite dies. The best config that survives the gate takes over the Genome and Kelly panels.
 
 ![Gene pool during one generation: births, lineage pulses and deaths](docs/images/genepool.gif)
 
-| Evolve | Select | Trade |
+| Evolve | Select | Forward test |
 | --- | --- | --- |
-| Crossover and mutation over 8 genes. Species quotas stop one lucky family from wiping out the rest. | Train on 70% of the tape, then gate on the unseen 30%. Only configs that stay profitable with low drawdown survive. | The leader runs a real grid-DCA bot on the out-of-sample candles: fills, take-profit, stop, fees. |
+| Crossover and mutation over 8 genes. Species quotas stop one lucky family from wiping out the rest. | Train on 70% of the tape, then gate on the unseen 30%. Only configs that stay profitable with low drawdown survive. | The frozen cohort runs real grid-DCA bots on live forward bars: fills, take-profit, stop, fees — click a row to inspect its order grid. |
 
 ![Evolution loop and best-of-generation fitness](docs/images/evolution.gif)
 
 ![Genome of the leader, natural selection funnel and Kelly sizing](docs/images/selection.png)
 
-![Paper grid engine with order levels and execution log](docs/images/trading.png)
+![Forward test: frozen cohort vs buy and hold with the order-grid inspector](docs/images/trading.png)
 
 ## Explore your way
 
 - **Run / Pause**, **Step** to the next generation, and **1× 2× 4× 8×** speed.
 - **Click any node** in the gene pool to inspect its genome, train and out-of-sample results. Click empty space or press **Esc** to return to the leader.
+- **Click a cohort row** in the forward test to inspect that frozen survivor's live order grid and its forward-tape fills.
 - Change the **seed** to grow a completely different evolution. Same seed, same result, every time.
 - Keyboard: **Space** pause, **→** step, **1–4** speed.
 - URL options: `?seed=42`, `?speed=4`, `?warm=50` (evolve 50 generations instantly on load), `?paused`.
@@ -86,6 +87,7 @@ Evolution can overfit the bundled tape. The **forward test** freezes the top-K g
 
 - Frozen cohorts live in `dist/data/snapshot.<SYMBOL>.js`. Re-freeze with `npm run snapshot -- --symbol SOLUSDT` (or `npm run snapshots` for all three). Defaults: seed 2026, 50 generations, 5 species-diverse survivors.
 - Stateless replay: every page load and every 10 minutes while the tab is open re-fetches and replays from T0; REFRESH forces a refetch. Same snapshot + same tape = same curve — no local storage, no hidden state.
+- Click a cohort row to open the inspector: that survivor's live order grid (TP, levels, SL or an armed preview) plus its forward fills — the execution log only ever records real forward bars.
 
 ## How it works
 
@@ -113,7 +115,7 @@ Each strategy is a long-only grid-DCA bot described by 8 genes:
 | **Mutate** | Tournament selection inside each species, uniform crossover, Gaussian mutation (p = 0.18) |
 | **Backtest** | Every newcomer is backtested on train (70%) and out-of-sample (30%) |
 | **Select** | Keep the top 4 overall plus the best of each species; everyone else dies |
-| **Deploy** | Best train fitness among configs that pass the gate becomes the paper-trading leader |
+| **Deploy** | Best train fitness among configs that pass the gate becomes the displayed leader (Genome + Kelly panels) |
 
 **Fitness:** `train return − 0.6 × max drawdown`, with a penalty below 4 trades.
 **Gate:** out-of-sample return > 1%, drawdown < 10%, at least 3 trades, win rate ≥ 50%.
@@ -123,7 +125,7 @@ Each strategy is a long-only grid-DCA bot described by 8 genes:
 - Signals are computed on the **close of bar j** and executed at the **open of bar j + 1**. A test proves that changing a future candle cannot change a past signal.
 - Inside a bar, fills are processed **adverse-first**: grid fills, then stop, then take-profit.
 - Every fill and exit pays a **0.04%** fee. Open positions are marked out at the end of a test window.
-- The paper-trading panel replays the out-of-sample candles with the **same `GridBot` class** that the backtests use, so what you see is what was scored.
+- The forward test replays **live bars after T0** with the **same `GridBot` class** that the backtests use, and the frozen cohort is never re-evolved — new bars can only come from data no genome has seen.
 
 ## Honest results
 
@@ -150,7 +152,7 @@ SETS MACHINE is a transparent research toy for watching evolutionary search work
 index.html            Redirects to dist/ (for GitHub Pages)
 dist/
   index.html          Dashboard shell and controls
-  app.js              Controller: generation timeline, paper trading, forward test, UI state
+  app.js              Controller: generation timeline, cohort inspector, forward test, UI state
   style.css           Responsive blue-and-white interface
   engine/
     series.js         Causal rolling mean / deviation / breakout high
@@ -158,7 +160,7 @@ dist/
     evolution.js      Genome, crossover, mutation, species quotas, gate
     forward.js        Live Binance klines fetch + frozen-cohort replay vs buy & hold
     rng.js            Seeded randomness
-  ui/draw.js          Canvas painters: logo, ring, fitness, gene pool, Kelly, chart
+  ui/draw.js          Canvas painters: logo, ring, fitness, gene pool, Kelly
   ui/forward.js       Forward-test equity chart (cohort vs buy & hold)
   data/candles.<S>.js Bundled hourly tapes: BTCUSDT, ETHUSDT, SOLUSDT (candles.js re-exports BTC)
   data/snapshot.<S>.js Frozen survivor cohorts per market (tools/make_snapshot.mjs)

@@ -46,7 +46,7 @@ export function runForward(snapshot, candles, startCash = 10000) {
   const runners = snapshot.survivors.map((sur) => ({
     sur,
     bot: new GridBot({ ...sur.genome }, startCash),
-    lastEv: [],
+    events: [], // every fill/exit on the forward tape, with bar time
   }));
   if (fromIdx < 0) return { series: s, fromIdx: -1, runners, curve: [], startCash };
 
@@ -54,7 +54,9 @@ export function runForward(snapshot, candles, startCash = 10000) {
   const bhQty = (startCash * (1 - FEE)) / s.open[fromIdx];
   const curve = [];
   for (let i = fromIdx; i < s.n; i++) {
-    for (const r of runners) r.lastEv = r.bot.step(s, i);
+    for (const r of runners) {
+      for (const e of r.bot.step(s, i)) r.events.push({ ...e, t: s.time[i] });
+    }
     curve.push({
       t: s.time[i],
       eqs: runners.map((r) => r.bot.equity(s.close[i])),

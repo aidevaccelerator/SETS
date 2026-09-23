@@ -1,5 +1,5 @@
 // SETS MACHINE controller: runs the evolution, animates each generation stage by stage,
-// and paper-trades the current leader on the out-of-sample part of the tape.
+// and renders the frozen-cohort forward test (the only place real new bars are traded).
 
 import { CANDLES as BTC_CANDLES, META as BTC_META } from './data/candles.BTCUSDT.js';
 import { CANDLES as ETH_CANDLES, META as ETH_META } from './data/candles.ETHUSDT.js';
@@ -8,7 +8,7 @@ import { SNAPSHOT as BTC_SNAP } from './data/snapshot.BTCUSDT.js';
 import { SNAPSHOT as ETH_SNAP } from './data/snapshot.ETHUSDT.js';
 import { SNAPSHOT as SOL_SNAP } from './data/snapshot.SOLUSDT.js';
 import { makeSeries, volatility } from './engine/series.js';
-import { GridBot, signal, FAMILIES } from './engine/bot.js';
+import { signal, FAMILIES } from './engine/bot.js';
 import { Evolution, GENES } from './engine/evolution.js';
 import { fetchCandles, runForward } from './engine/forward.js';
 import * as D from './ui/draw.js';
@@ -27,13 +27,13 @@ const setHTML = (el, s) => { if (el.__h !== s) { el.innerHTML = s; el.__h = s; }
 const pct = (x, d = 1) => (x >= 0 ? '+' : '−') + Math.abs(x * 100).toFixed(d) + '%';
 const tapeTime = (sec) => { const d = new Date(sec * 1000); return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`; };
 
-const STAGE = 0.8, CYCLE = STAGE * 6, BAR_T = 0.4, START_CASH = 10000;
+const STAGE = 0.8, CYCLE = STAGE * 6, START_CASH = 10000;
 const GI = Object.fromEntries(GENES.map((G) => [G.key, G]));
 const norm = (key, v) => (v - GI[key].min) / (GI[key].max - GI[key].min);
 const q = new URLSearchParams(location.search);
 
 let symKey, CANDLES, META, S, snapshot; // current tape — rebound by loadTape()
-let fw = { status: 'loading', at: 0 }, fwBusy = false, fwQueued = false;
+let fw = { status: 'loading', at: 0 }, fwBusy = false, fwQueued = false, fwSel = 0;
 
 function loadTape(key) {
   const t = TAPE[key] || TAPE.BTC;
@@ -43,13 +43,14 @@ function loadTape(key) {
   snapshot = t.snapshot;
   S = makeSeries(CANDLES);
   fw = { status: 'loading', at: 0 };
+  fwSel = 0;
   document.querySelectorAll('[data-sym]').forEach((b) => b.classList.toggle('on', b.dataset.sym === symKey));
   $('sym').textContent = META.symbol;
   setText($('meta'), `${META.symbol} ${META.interval} · ${fmt(META.count)} candles · ${tapeTime(META.from)} → ${tapeTime(META.to)} UTC · train 70% / out-of-sample 30%`);
 }
 
 const cv = {};
-['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'chart', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
+['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
 
 let st; // whole simulation state; rebuilt on restart
 
@@ -60,12 +61,11 @@ function restart(seed, warm = 0) {
     seed, evo, ct: CYCLE * 0.999, t: 0, rep: evo.last,
     nodes: new Map(), edges: [], lineage: [],
     shown: null, pending: null, geneFlash: null,
-    paper: { bot: null, i: evo.valFrom + 24, frac: 0, realized: 0, queued: null },
-    log: [], marks: [], inspect: null, hover: null, P: new Map(),
+    inspect: null, hover: null, P: new Map(),
   };
   evo.pop.forEach((ind) => addNode(ind, -1));
   rankNodes(); buildEdges();
-  if (evo.leader) promote(evo.leader, true);
+  if (evo.leader) promote(evo.leader);
   $('seed').value = seed;
   syncUrl();
 }
@@ -119,62 +119,18 @@ function startGeneration() {
   rankNodes(); buildEdges();
   st.pending = rep.promoted ? rep.leader : null;
   st.deployed = false;
-  const vol = volatility(S, st.paper.i - 1) * 100;
-  pushLog('SCAN', 'ev', `gen ${rep.gen} · tape σ ${vol.toFixed(2)}%/h · ${rep.immigrants.length + rep.offspring.length} new configs`);
 }
 
 function deploy() {
   st.deployed = true;
-  const rep = st.rep;
-  if (st.pending) { promote(st.pending, false); st.pending = null; }
-  else if (rep.leader) pushLog('HOLD', 'ev', `gen ${rep.gen} · g${rep.leader.id} defends the title · ${rep.survivors}/${st.evo.N} pass gate`);
-  else pushLog('HOLD', 'bad', `gen ${rep.gen} · nobody passed the gate · staying flat`);
+  if (st.pending) { promote(st.pending); st.pending = null; }
 }
 
-function promote(leader, silent) {
+// Promote only feeds the Genome / Kelly panels — the forward cohort is frozen at T0.
+function promote(leader) {
   const prev = st.shown;
   st.shown = leader;
   if (prev) st.geneFlash = { keys: GENES.filter((G) => G.int ? prev.genome[G.key] !== leader.genome[G.key] : Math.abs(prev.genome[G.key] - leader.genome[G.key]) > 1e-9).map((G) => G.key), t: st.t };
-  const p = st.paper;
-  if (!p.bot) p.bot = new GridBot(leader.genome, START_CASH);
-  else if (!p.bot.inPos) p.bot = swapBot(leader.genome);
-  else { p.queued = leader.genome; if (!silent) pushLog('QUEUE', 'ev', `g${leader.id} waits for the open position to close`); }
-  if (!silent) pushLog('EVOLVE', 'ev', `gen ${st.rep.gen} · g${leader.id} promoted · OOS ${pct(leader.val.ret)} · DD ${(leader.val.maxDD * 100).toFixed(1)}%`);
-}
-
-function swapBot(genome) {
-  const b = new GridBot(genome, st.paper.bot.cash);
-  b.start = START_CASH; b.peak = Math.max(b.peak, st.paper.bot.peak);
-  return b;
-}
-
-// ---------------- paper trading ----------------
-function advancePaper(dt) {
-  const p = st.paper, evo = st.evo;
-  p.frac += dt / BAR_T;
-  while (p.frac >= 1) {
-    p.frac -= 1;
-    if (p.bot) {
-      for (const e of p.bot.step(S, p.i)) {
-        st.marks.push(e);
-        if (e.type === 'BUY') pushLog('BUY', '', `${e.level} filled @ ${money(e.price)} · $${fmt(e.usd)}`, p.i);
-        else { p.realized += e.pnl; pushLog(e.type === 'TP' ? 'TP' : 'STOP', e.type === 'TP' ? '' : 'bad', `closed @ ${money(e.price)} · ${e.pnl >= 0 ? '+' : '−'}$${Math.abs(e.pnl).toFixed(2)}`, p.i); }
-        if (e.type !== 'BUY' && p.queued) { p.bot = swapBot(p.queued); p.queued = null; pushLog('SWAP', 'ev', 'queued leader takes over the grid', p.i); break; }
-      }
-    }
-    p.i++;
-    if (p.i >= evo.valTo) {
-      if (p.bot && p.bot.inPos) { const cost = p.bot.cost; p.bot.flatten(S, evo.valTo - 1); const tr = p.bot.trades[p.bot.trades.length - 1]; p.realized += tr.pnl; pushLog('EOD', 'bad', `tape end · flattened $${fmt(cost)} · ${tr.pnl >= 0 ? '+' : '−'}$${Math.abs(tr.pnl).toFixed(2)}`, evo.valTo - 1); }
-      p.i = evo.valFrom + 24; st.marks = [];
-      pushLog('REWIND', 'ev', 'out-of-sample tape restarts', p.i);
-    }
-  }
-  if (st.marks.length > 60) st.marks = st.marks.slice(-60);
-}
-
-function pushLog(k, cls, txt, i = st.paper.i) {
-  st.log.push({ k, cls, txt, time: S.time[Math.min(i, S.n - 1)], t: st.t });
-  if (st.log.length > 30) st.log.shift();
 }
 
 // ---------------- frame ----------------
@@ -185,7 +141,6 @@ function update(dt) {
   st.ct += dt;
   if (st.ct >= STAGE * 5 && !st.deployed) deploy();
   if (st.ct >= CYCLE) { if (!st.deployed) deploy(); st.ct -= CYCLE; if (st.ct >= CYCLE) st.ct = 0; startGeneration(); }
-  advancePaper(dt);
 }
 
 function nodeStates() {
@@ -209,18 +164,18 @@ function nodeStates() {
 
 function stageText(stage) {
   const r = st.rep, evo = st.evo, off = r.offspring[0] ? evo.byId(r.offspring[0]) : null;
-  const vol = volatility(S, st.paper.i - 1) * 100;
+  const vol = volatility(S, S.n - 1) * 100;
   return [
     `tape σ ${vol.toFixed(2)}%/h · ${evo.split - evo.trainFrom} h train · ${evo.valTo - evo.valFrom} h out-of-sample`,
     `${r.immigrants.length} random immigrants injected into the pool`,
     off && off.parents.length ? `crossover g${off.parents[0]} × g${off.parents[1]} → ${r.offspring.length} offspring · p(mut) 0.18` : `${r.offspring.length} offspring bred`,
     `${r.immigrants.length + r.offspring.length} backtests on real ${META.symbol} ${META.interval} candles`,
     `gate passed ${r.survivors}/${evo.N} · ${r.died.length} killed · ${evo.N - r.died.length} elites kept`,
-    r.leader ? (st.pending || r.promoted ? `g${r.leader.id} hot-swapped into the paper grid` : `leader g${r.leader.id} defends the title`) : 'no survivor yet · grid stays flat',
+    r.leader ? (st.pending || r.promoted ? `g${r.leader.id} promoted · genome & Kelly panels updated` : `leader g${r.leader.id} defends the title`) : 'no survivor yet · no leader genome',
   ][stage];
 }
 
-const PHASES = [[1, 'SCAN', 'reading the tape'], [1, 'SCAN', 'injecting new ideas'], [2, 'BREED', 'crossover + mutation'], [3, 'TEST', 'backtesting offspring'], [3, 'SELECT', 'the gate kills the weak'], [4, 'DEPLOY', 'leader goes to the paper grid']];
+const PHASES = [[1, 'SCAN', 'reading the tape'], [1, 'SCAN', 'injecting new ideas'], [2, 'BREED', 'crossover + mutation'], [3, 'TEST', 'backtesting offspring'], [3, 'SELECT', 'the gate kills the weak'], [4, 'DEPLOY', 'leader genome takes the panels']];
 
 function render() {
   const evo = st.evo, rep = st.rep, ct = st.ct, stage = Math.min(5, Math.floor(ct / STAGE)), sp = (ct - stage * STAGE) / STAGE;
@@ -257,14 +212,14 @@ function render() {
   setHTML($('legend'), FAMILIES.map((f, i) => `<div><i style="background:${D.SPECIES[i].color}"></i>${f} <em>${counts[i]}</em></div>`).join(''));
   setText($('meshCount'), `GEN ${rep.gen} · BORN ${fmt(evo.born)} · KILLED ${fmt(evo.killed)}`);
   st.P = D.drawMesh(cv.mesh, { nodes: st.nodes, edges: st.edges, lineage: st.lineage, ct, t, leaderId: st.shown && st.shown.id, inspectId: st.inspect, hoverId: st.hover, births, deaths });
-  renderGenome(); renderSelection(stage, sp); renderKelly(t); renderTrade();
+  renderGenome(); renderSelection(stage, sp); renderKelly(t);
 }
 
 function renderGenome() {
   const n = st.inspect && st.nodes.get(st.inspect);
   const ind = n ? n.ind : st.shown;
   setText($('genomeTitle'), n ? 'GENOME · INSPECTING' : 'GENOME · LIVE LEADER');
-  setText($('genomeSub'), n ? 'CLICK EMPTY SPACE OR PRESS ESC TO RETURN TO THE LEADER' : 'DNA OF THE CONFIG THAT IS PAPER TRADING');
+  setText($('genomeSub'), n ? 'CLICK EMPTY SPACE OR PRESS ESC TO RETURN TO THE LEADER' : 'DNA OF THE CURRENT LEADER · CHOSEN BY THE OUT-OF-SAMPLE GATE');
   if (!ind) { setHTML($('genes'), '<div class="sig">No config has passed the out-of-sample gate yet.</div>'); setText($('genomeId'), ''); setHTML($('genomeFoot'), ''); return; }
   setText($('genomeId'), `g${ind.id} · BORN GEN ${ind.gen}`);
   const flash = !n && st.geneFlash && st.t - st.geneFlash.t < 2.2 ? st.geneFlash.keys : [];
@@ -314,57 +269,6 @@ function renderKelly(t) {
   D.drawKelly(cv.kelly, { W, R, t });
 }
 
-function renderTrade() {
-  const p = st.paper, bot = p.bot, g = bot ? bot.g : null, i = p.i;
-  let preview = null;
-  if (bot && !bot.inPos) {
-    const px = S.close[i - 1];
-    let w = 0; for (let k = 0; k < g.levels; k++) w += Math.pow(g.mult, k);
-    preview = Array.from({ length: g.levels }, (_, k) => ({ name: 'L' + (k + 1), price: px * (1 - g.spacing * k), usd: (bot.cash / w) * Math.pow(g.mult, k), filled: false }));
-  }
-  const price = D.drawChart(cv.chart, { s: S, from: st.evo.valFrom, i, frac: p.frac, bot, preview, marks: st.marks, empty: bot ? '' : 'WAITING FOR THE FIRST SURVIVOR' });
-  const o = S.open[i], c = price;
-  setHTML($('ohlc'), `<em>${tapeTime(S.time[i])} UTC</em>  <em>O</em>${money(o)}  <em>C</em>${money(c)}  <em>Δ</em>${pct(c / o - 1, 2)}  <em>VOL</em>${fmt(S.volume[i] * p.frac)} ${META.symbol.slice(0, -4)}`);
-  setText($('chSym'), META.symbol);
-  if (!bot) { setText($('chCfg'), 'NO LEADER YET'); setText($('chState'), 'FLAT'); }
-  else {
-    setText($('chCfg'), `LEADER g${st.shown ? st.shown.id : '?'} · ${FAMILIES[g.family]} · ${g.levels} LEVELS · ${(g.spacing * 100).toFixed(2)}% SPACING · TP ${(g.tp * 100).toFixed(2)}%`);
-    setText($('chState'), bot.inPos ? `IN POSITION · ${bot.levels.filter((L) => L.filled).length}/${bot.levels.length} FILLED` : 'FLAT · WAITING FOR SIGNAL');
-  }
-  const eq = bot ? bot.equity(price) : START_CASH;
-  setText($('cAvg'), bot && bot.inPos ? money(bot.avg) : '—');
-  setText($('cTp'), bot && bot.inPos ? money(bot.tp) : '—');
-  setText($('cPos'), bot && bot.inPos ? money(bot.cost) : '$0');
-  const unr = bot && bot.inPos ? bot.qty * price - bot.cost : 0;
-  const u = $('cUnr'); setText(u, (unr >= 0 ? '+$' : '−$') + Math.abs(unr).toFixed(2)); u.style.color = unr > 0 ? D.C.royal : D.C.ink;
-  const rl = $('cReal'); setText(rl, (p.realized >= 0 ? '+$' : '−$') + Math.abs(p.realized).toFixed(2)); rl.style.color = p.realized >= 0 ? D.C.royal : D.C.ink;
-  setText($('cEq'), money(eq));
-  // order grid
-  const rows = [];
-  if (bot && bot.inPos) {
-    rows.push(`<div class="grow2 tp"><span class="l">TP</span><span>${money(bot.tp)}</span><span>100%</span><span class="s">${pct(bot.tp / price - 1, 2)} ↑</span></div>`);
-    const next = bot.levels.find((L) => !L.filled);
-    bot.levels.forEach((L) => {
-      const flash = L.filled && L.t === i - 1 && p.frac < 0.8;
-      const cls = flash ? ' flash f' : L.filled ? ' f' : L === next ? ' near' : '';
-      const s = L.filled ? 'FILLED' : L === next ? ((price / L.price - 1) * 100).toFixed(2) + '% AWAY' : 'ARMED';
-      rows.push(`<div class="grow2${cls}"><span class="l">${L.name}</span><span>${money(L.price)}</span><span>$${fmt(L.usd)}</span><span class="s">${s}</span></div>`);
-    });
-    rows.push(`<div class="grow2 ghost"><span class="l">SL</span><span>${money(bot.stop)}</span><span>ALL</span><span class="s">${pct(bot.stop / price - 1, 2)}</span></div>`);
-  } else if (preview) {
-    preview.forEach((L) => rows.push(`<div class="grow2 ghost"><span class="l">${L.name}</span><span>${money(L.price)}</span><span>$${fmt(L.usd)}</span><span class="s">PREVIEW</span></div>`));
-  }
-  setHTML($('grows'), rows.join(''));
-  const badge = $('gridBadge');
-  setText(badge, bot && bot.inPos ? 'PRE-COMMITTED' : 'ARMED'); badge.classList.toggle('off', !(bot && bot.inPos));
-  if (bot && !bot.inPos) {
-    const sg = signal(g, S, i - 1);
-    setHTML($('sig'), `SIGNAL <b>${sg.ok ? 'FIRES NEXT BAR' : 'WAITING'}</b> · z ${sg.z.toFixed(2)} · need ${sg.need}`);
-  } else if (bot) setHTML($('sig'), `IN TRADE <b>${i - bot.openedAt} h</b> · STOP ${money(bot.stop)}`);
-  else setHTML($('sig'), '');
-  setHTML($('log'), st.log.slice(-6).map((e) => `<div class="${st.t - e.t < 0.8 ? 'new' : ''}"><b class="${e.cls}">${e.k}</b>${tapeTime(e.time)} <span>${e.txt}</span></div>`).join(''));
-}
-
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (running) update(dt * speed);
@@ -374,6 +278,67 @@ function frame(now) {
 }
 
 // ---------------- forward test (frozen cohort on live bars) ----------------
+function renderFwHeader(run) {
+  const bars = $('sFwdBars'), edge = $('sFwdEdge');
+  if (!run || !run.curve.length) {
+    setText(bars, run ? '0' : '—');
+    setText(edge, '—');
+    edge.classList.remove('acc');
+    return;
+  }
+  setText(bars, String(run.bars));
+  let best = -Infinity;
+  for (const r of run.runners) best = Math.max(best, r.equity);
+  const pp = (best / run.startCash - 1 - (run.bh / run.startCash - 1)) * 100;
+  setText(edge, (pp >= 0 ? '+' : '−') + Math.abs(pp).toFixed(1) + 'pp');
+  edge.classList.toggle('acc', pp >= 0);
+}
+
+// One frozen survivor's live order grid + its forward-tape fills.
+function renderFwInspector(run, k) {
+  const r = run.runners[k];
+  if (!r) {
+    setText($('fwInspH'), 'ORDER GRID');
+    setHTML($('fwInsp'), '');
+    setHTML($('fwEv'), '');
+    return;
+  }
+  const bot = r.bot, g = bot.g, price = run.price;
+  setText($('fwInspH'), `ORDER GRID · g${r.sur.id} · ${FAMILIES[g.family]}`);
+  const rows = [];
+  if (bot.inPos) {
+    rows.push(`<div class="grow2 tp"><span class="l">TP</span><span>${money(bot.tp)}</span><span>100%</span><span class="s">${pct(bot.tp / price - 1, 2)} ↑</span></div>`);
+    const next = bot.levels.find((L) => !L.filled);
+    bot.levels.forEach((L) => {
+      const cls = L.filled ? ' f' : L === next ? ' near' : '';
+      const s = L.filled ? 'FILLED' : L === next ? ((price / L.price - 1) * 100).toFixed(2) + '% AWAY' : 'ARMED';
+      rows.push(`<div class="grow2${cls}"><span class="l">${L.name}</span><span>${money(L.price)}</span><span>$${fmt(L.usd)}</span><span class="s">${s}</span></div>`);
+    });
+    rows.push(`<div class="grow2 ghost"><span class="l">SL</span><span>${money(bot.stop)}</span><span>ALL</span><span class="s">${pct(bot.stop / price - 1, 2)}</span></div>`);
+    const unreal = bot.qty * price - bot.cost;
+    rows.push(`<div class="sig">IN TRADE <b>${run.series.n - bot.openedAt} bars</b> · AVG ${money(bot.avg)} · UNREAL <b>${(unreal >= 0 ? '+$' : '−$') + Math.abs(unreal).toFixed(2)}</b></div>`);
+  } else {
+    let w = 0; for (let i = 0; i < g.levels; i++) w += Math.pow(g.mult, i);
+    for (let i = 0; i < g.levels; i++) {
+      rows.push(`<div class="grow2 ghost"><span class="l">L${i + 1}</span><span>${money(price * (1 - g.spacing * i))}</span><span>$${fmt((bot.cash / w) * Math.pow(g.mult, i))}</span><span class="s">PREVIEW</span></div>`);
+    }
+    const sg = signal(g, run.series, run.series.n - 1);
+    rows.push(`<div class="sig">SIGNAL <b>${sg.ok ? 'FIRES NEXT BAR' : 'WAITING'}</b> · z ${sg.z.toFixed(2)}${sg.need ? ' · need ' + sg.need : ''}</div>`);
+  }
+  setHTML($('fwInsp'), rows.join(''));
+  const evs = r.events.slice(-6);
+  setHTML(
+    $('fwEv'),
+    evs.length
+      ? evs.map((e) =>
+          e.type === 'BUY'
+            ? `<div><b>BUY</b>${tapeTime(e.t)} <span>${e.level} filled @ ${money(e.price)} · $${fmt(e.usd)}</span></div>`
+            : `<div><b class="${e.type === 'TP' ? '' : 'bad'}">${e.type}</b>${tapeTime(e.t)} <span>closed @ ${money(e.price)} · ${e.pnl >= 0 ? '+' : '−'}$${Math.abs(e.pnl).toFixed(2)}</span></div>`,
+        ).join('')
+      : '<div><span>NO FILLS YET · ONLY REAL FORWARD BARS COUNT</span></div>',
+  );
+}
+
 async function refreshForward() {
   if (!snapshot) return;
   if (fwBusy) { fwQueued = true; return; }
@@ -418,6 +383,7 @@ function utcTime(sec) {
 }
 
 function renderForward() {
+  renderFwHeader(fw.run);
   const stEl = $('fwStatus');
   if (!snapshot) {
     setText(stEl, 'NO SNAPSHOT');
@@ -442,7 +408,9 @@ function renderForward() {
   setText($('fwBars'), run.bars ? `${fmt(run.bars)} HOURLY BARS · UPDATED ${new Date(fw.at).toLocaleTimeString('en-GB')}` : '');
   setText($('fwPrice'), run.bars ? `${META.symbol} ${money(run.price)} · B&H ENTRY ${money(run.open)}` : '');
   drawForward(cv.fwChart, { curve: run.curve, startCash: run.startCash, runners: run.runners, bhColor: BH_COLOR });
-  // cohort table
+  const sel = clamp(fwSel, 0, run.runners.length - 1);
+  fwSel = sel;
+  // cohort table — rows are click targets for the inspector
   const rows = run.runners.map((r, k) => {
     const bot = r.bot, col = FW_COLORS[k % FW_COLORS.length];
     const eq = r.equity ?? run.startCash;
@@ -450,7 +418,7 @@ function renderForward() {
     const dd = bot.maxDD;
     const state = bot.inPos ? `IN POS ${bot.levels.filter((L) => L.filled).length}/${bot.levels.length}` : 'FLAT';
     return (
-      `<div class="fwdata${bot.inPos ? ' inpos' : ''}">` +
+      `<div class="fwdata${bot.inPos ? ' inpos' : ''}${k === sel ? ' sel' : ''}" data-idx="${k}" role="button" tabindex="0">` +
       `<span class="fid"><i style="background:${col}"></i>g${r.sur.id}</span>` +
       `<span class="fsp">${r.sur.family}</span>` +
       `<span class="${ret >= 0 ? 'pos' : 'neg'}">${pct(ret, 2)}</span>` +
@@ -461,12 +429,13 @@ function renderForward() {
   });
   const bh = run.bars ? run.bh / run.startCash - 1 : 0;
   rows.push(
-    `<div class="fwdata"><span class="fid"><i style="background:${BH_COLOR}"></i>B&H</span>` +
+    `<div class="fwdata bh"><span class="fid"><i style="background:${BH_COLOR}"></i>B&H</span>` +
       `<span class="fsp">BUY AND HOLD</span>` +
       `<span class="${bh >= 0 ? 'pos' : 'neg'}">${run.bars ? pct(bh, 2) : '—'}</span>` +
       `<span>—</span><span>${run.bars ? 1 : 0}</span><span>${run.bars ? 'HELD' : 'WAITING'}</span></div>`,
   );
   setHTML($('fwRows'), rows.join(''));
+  renderFwInspector(run, sel);
 }
 
 // ---------------- controls ----------------
@@ -490,6 +459,20 @@ function step() {
 $('bPlay').onclick = () => setRunning(!running);
 $('bStep').onclick = step;
 $('fwRefresh').onclick = () => refreshForward();
+$('fwRows').addEventListener('click', (e) => {
+  const row = e.target.closest('[data-idx]');
+  if (!row) return;
+  fwSel = +row.dataset.idx;
+  renderForward();
+});
+$('fwRows').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('[data-idx]');
+  if (!row) return;
+  e.preventDefault();
+  fwSel = +row.dataset.idx;
+  renderForward();
+});
 document.querySelectorAll('[data-speed]').forEach((b) => { b.onclick = () => setSpeed(+b.dataset.speed); });
 document.querySelectorAll('[data-sym]').forEach((b) => {
   b.onclick = () => {
