@@ -9,7 +9,7 @@ A genetic algorithm breeds grid-DCA trading strategies on real BTC, ETH and SOL 
 
 [**Run it locally →**](#run-locally) · [How it works](#how-it-works) · [Honest results](#honest-results) · [Promo video](docs/media/sets-machine-promo.mp4)
 
-![SETS MACHINE dashboard: evolution loop, fitness history and the live gene pool](docs/images/hero.png)
+![SETS MACHINE dashboard: evolution loop, fitness history and the gate board](docs/images/hero.png)
 
 **96 configs per generation · 8 genes · 4 species · 2 399 real BTCUSDT hours · No build, no npm install, no API keys**
 
@@ -17,9 +17,7 @@ A genetic algorithm breeds grid-DCA trading strategies on real BTC, ETH and SOL 
 
 ## Watch it evolve
 
-Every 4.8 seconds a new generation is born. Immigrants and offspring appear in the gene pool, get backtested, face the out-of-sample gate, and everything that is not an elite dies. The best config that survives the gate takes over the Genome and Kelly panels.
-
-![Gene pool during one generation: births, lineage pulses and deaths](docs/images/genepool.gif)
+Every 4.8 seconds a new generation is born. Immigrants and offspring get backtested, face the out-of-sample gate, and everything that is not an elite dies. The survivors land on the **gate board** with their train and OOS numbers; the best of them takes over the Genome and Kelly panels.
 
 | Evolve | Select | Forward test |
 | --- | --- | --- |
@@ -34,7 +32,7 @@ Every 4.8 seconds a new generation is born. Immigrants and offspring appear in t
 ## Explore your way
 
 - **Run / Pause**, **Step** to the next generation, and **1× 2× 4× 8×** speed.
-- **Click any node** in the gene pool to inspect its genome, train and out-of-sample results. Click empty space or press **Esc** to return to the leader.
+- **Click a gate-board row** to inspect that survivor's genome, train and out-of-sample results. Click it again or press **Esc** to return to the leader.
 - **Click a cohort row** in the forward test to inspect that frozen survivor's live order grid and its forward-tape fills.
 - Change the **seed** to grow a completely different evolution. Same seed, same result, every time.
 - Keyboard: **Space** pause, **→** step, **1–4** speed.
@@ -160,7 +158,7 @@ dist/
     evolution.js      Genome, crossover, mutation, species quotas, gate
     forward.js        Live Binance klines fetch + frozen-cohort replay vs buy & hold
     rng.js            Seeded randomness
-  ui/draw.js          Canvas painters: logo, ring, fitness, gene pool, Kelly
+  ui/draw.js          Canvas painters: logo, ring, fitness, Kelly
   ui/forward.js       Forward-test equity chart (cohort vs buy & hold)
   data/candles.<S>.js Bundled hourly tapes: BTCUSDT, ETHUSDT, SOLUSDT (candles.js re-exports BTC)
   data/snapshot.<S>.js Frozen survivor cohorts per market (tools/make_snapshot.mjs)

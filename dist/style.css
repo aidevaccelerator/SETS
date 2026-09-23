@@ -102,17 +102,26 @@ label { display: block; color: var(--mute); font-size: 8.5px; letter-spacing: .0
 .stageline b { color: var(--royal); letter-spacing: .06em; }
 .stageline span:last-child { overflow: hidden; text-overflow: ellipsis; }
 
-/* mesh */
-.meshp { height: 470px; }
-.phase { border: 1px solid var(--royal); border-radius: 8px; padding: 6px 10px; text-align: right; background: #f5f9ff; }
-.phase b { display: block; color: var(--royal); font-size: 10px; letter-spacing: .06em; }
-.phase span { display: block; color: var(--mute); font-size: 9px; letter-spacing: .05em; margin-top: 2px; }
-.legend { position: absolute; left: 16px; top: 80px; z-index: 2; display: grid; gap: 4px; font-size: 9.5px; letter-spacing: .05em; pointer-events: none; }
-.legend div { display: flex; align-items: center; gap: 7px; }
-.legend i { width: 9px; height: 9px; border-radius: 2px; }
-.legend em { font-style: normal; color: var(--mute); }
-#mesh { cursor: crosshair; user-select: none; -webkit-user-select: none; }
-#mesh.hand { cursor: pointer; }
+/* gate board */
+.gate { min-height: 0; }
+.gbtbl { margin-top: 10px; font-size: 10px; max-height: 340px; overflow: auto; }
+.gbrow, .gbdata { display: grid; grid-template-columns: 64px 1.2fr 64px 56px 44px 32px 64px; align-items: center; gap: 8px; }
+.gbrow { color: var(--mute); font-size: 8.5px; letter-spacing: .08em; padding: 0 8px 6px; position: sticky; top: 0; background: var(--panel); }
+.gbrow span:nth-child(n+3) { text-align: right; }
+.gbdata { padding: 6px 8px; margin: 0 -8px; border-top: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.gbdata:hover { background: var(--faint); }
+.gbdata.sel { background: var(--pale); }
+.gbdata.lead .grole { color: var(--royal); }
+.gbdata:focus-visible { outline: 2px solid var(--royal); outline-offset: -2px; }
+.gbdata span:nth-child(n+3) { text-align: right; font-weight: 700; }
+.gbdata .fid { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.gbdata .fid i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.gbdata .fsp { color: var(--mute); font-size: 9.5px; letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gbdata .pos { color: var(--royal); }
+.gbdata .neg { color: #64748b; }
+.gbdata .grole { font-size: 8.5px; letter-spacing: .06em; color: #9fb0c9; }
+.gbdata.sel .grole { color: var(--navy); }
+.gbempty { color: var(--mute); font-size: 9.5px; padding: 14px 0; letter-spacing: .04em; }
 
 /* trio */
 .trio { min-height: 262px; }
@@ -216,7 +225,6 @@ label { display: block; color: var(--mute); font-size: 8.5px; letter-spacing: .0
   .ringp, .fwt { width: auto; }
   .ringp { height: 280px; }
   .fitp { height: 300px; }
-  .meshp { height: 420px; }
   .kelp { height: 280px; }
   .fwdp { height: 340px; min-height: 340px; }
   .meta { margin-left: 0; width: 100%; }
@@ -229,8 +237,7 @@ label { display: block; color: var(--mute); font-size: 8.5px; letter-spacing: .0
   .stat b { font-size: 17px; }
   .kv4 { grid-template-columns: repeat(2, 1fr); }
   .fwrow, .fwdata { grid-template-columns: 52px 1fr 52px 40px 26px 68px; font-size: 9px; }
-  .legend { position: static; margin-top: 8px; grid-template-columns: 1fr 1fr; }
-  .meshp { height: 480px; }
+  .gbrow, .gbdata { grid-template-columns: 56px 1fr 52px 48px 38px 26px 52px; font-size: 9px; gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .gene { transition: none; }

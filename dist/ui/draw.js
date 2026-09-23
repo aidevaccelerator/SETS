@@ -5,10 +5,10 @@ export const C = {
   sky: '#38bdf8', light: '#93c5fd', pale: '#dbeafe', navy: '#0b2a6b', white: '#ffffff', grey: '#9fb0c9',
 };
 export const SPECIES = [
-  { color: '#1e3a8a', cx: 0.50, cy: 0.28 },
-  { color: '#2563eb', cx: 0.80, cy: 0.55 },
-  { color: '#60a5fa', cx: 0.20, cy: 0.55 },
-  { color: '#0891b2', cx: 0.52, cy: 0.80 },
+  { color: '#1e3a8a' },
+  { color: '#2563eb' },
+  { color: '#60a5fa' },
+  { color: '#0891b2' },
 ];
 export const STAGES = ['OBSERVE', 'HYPOTHESIZE', 'MUTATE', 'BACKTEST', 'SELECT', 'DEPLOY'];
 
@@ -21,7 +21,6 @@ export const money = (n) => {
   const a = Math.abs(n);
   return (n < 0 ? '−$' : '$') + (a < 1000 ? a.toFixed(2) : fmt(a));
 };
-export const hash = (k) => { let x = Math.imul(k ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35); x ^= x >>> 16; return (x >>> 0) / 4294967296; };
 
 // Keeps a canvas sharp at any size / DPR.
 export function sized(el) {
@@ -166,85 +165,6 @@ export function drawFitness(cv, hist, gf) {
   g.fillStyle = C.royal; g.fillRect(padL + 2, 3, 14, 2.2); g.fillStyle = C.mute; g.fillText('BEST', padL + 20, 4);
   g.strokeStyle = C.sky; g.setLineDash([4, 3]); g.lineWidth = 1.2; line(g, [[padL + 56, 4], [padL + 70, 4]]); g.stroke(); g.setLineDash([]);
   g.fillText('POPULATION MEAN', padL + 74, 4);
-}
-
-// ---------------- gene pool graph ----------------
-export function nodeXY(n, t, w, h) {
-  return [n.x * w + Math.sin(t * 0.5 + n.ph) * 3, n.y * h + Math.cos(t * 0.42 + n.ph * 1.3) * 2.5];
-}
-
-export function drawMesh(cv, { nodes, edges, lineage, ct, t, leaderId, inspectId, hoverId, births, deaths }) {
-  const { g, w, h } = cv;
-  g.clearRect(0, 0, w, h);
-  const P = new Map();
-  nodes.forEach((n) => P.set(n.id, nodeXY(n, t, w, h)));
-  SPECIES.forEach((sp) => {
-    const x = sp.cx * w, y = sp.cy * h, rad = Math.min(w, h) * 0.38;
-    const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, hexA(sp.color, 0.08)); gr.addColorStop(1, hexA(sp.color, 0));
-    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
-  });
-  const vis = (n) => n.alpha > 0.02;
-  // similarity edges
-  g.lineWidth = 0.7;
-  edges.forEach(([a, b, cross]) => {
-    const na = nodes.get(a), nb = nodes.get(b); if (!na || !nb || !vis(na) || !vis(nb)) return;
-    const pa = P.get(a), pb = P.get(b), al = Math.min(na.alpha, nb.alpha);
-    g.strokeStyle = cross ? `rgba(11,42,107,${0.07 * al})` : hexA(SPECIES[na.fam].color, 0.26 * al);
-    g.beginPath(); g.moveTo(pa[0], pa[1]); g.lineTo(pb[0], pb[1]); g.stroke();
-  });
-  // lineage pulses: parent → child, drawn while the child is being born
-  lineage.forEach(({ from, to, t0 }) => {
-    const na = nodes.get(from), nb = nodes.get(to); if (!na || !nb) return;
-    const k = (ct - t0) / 0.6; if (k < 0 || k > 1.6) return;
-    const pa = P.get(from), pb = P.get(to), col = SPECIES[nb.fam].color, e = ease(Math.min(1, k));
-    const x = lerp(pa[0], pb[0], e), y = lerp(pa[1], pb[1], e), fade = k > 1 ? 1 - (k - 1) / 0.6 : 1;
-    g.strokeStyle = hexA(col, 0.5 * fade); g.lineWidth = 1.6; g.lineCap = 'round';
-    g.beginPath(); g.moveTo(pa[0], pa[1]); g.lineTo(x, y); g.stroke(); g.lineCap = 'butt';
-    if (k < 1) {
-      const hg = g.createRadialGradient(x, y, 0, x, y, 11); hg.addColorStop(0, 'rgba(56,189,248,0.9)'); hg.addColorStop(1, 'rgba(56,189,248,0)');
-      g.fillStyle = hg; g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.fill();
-    }
-  });
-  // nodes
-  nodes.forEach((n) => {
-    if (!vis(n)) return;
-    const [x, y] = P.get(n.id), col = SPECIES[n.fam].color;
-    const rr = n.r * n.scale;
-    g.globalAlpha = n.alpha;
-    if (n.halo) { g.fillStyle = hexA(col, 0.14); g.beginPath(); g.arc(x, y, rr + 5 + 2 * Math.sin(t * 2 + n.ph), 0, Math.PI * 2); g.fill(); }
-    g.beginPath(); g.arc(x, y, Math.max(0.5, rr), 0, Math.PI * 2);
-    if (n.dying) { g.fillStyle = C.white; g.fill(); g.strokeStyle = C.grey; g.lineWidth = 1.2; g.stroke(); }
-    else { g.fillStyle = hexA(col, 0.92); g.fill(); g.strokeStyle = C.white; g.lineWidth = 0.8; g.stroke(); }
-    g.globalAlpha = 1;
-  });
-  // birth / death rings
-  const ring = (id, k, color, label) => {
-    const n = nodes.get(id); if (!n) return;
-    const [x, y] = P.get(id);
-    g.strokeStyle = hexA(color, 1 - k); g.lineWidth = 1.5;
-    g.beginPath(); g.arc(x, y, n.r + 4 + k * 24, 0, Math.PI * 2); g.stroke();
-    if (label && k < 0.7) {
-      g.globalAlpha = 1 - k / 0.7; g.font = '700 8.5px "JetBrains Mono"'; g.textAlign = 'left'; g.textBaseline = 'middle';
-      g.fillStyle = color === C.sky ? C.royal : '#7d8fae'; g.fillText(label, x + n.r + 7, y - 9 - k * 8); g.globalAlpha = 1;
-    }
-  };
-  births.forEach(([id, k, lab]) => ring(id, k, C.sky, lab));
-  deaths.forEach(([id, k, lab]) => ring(id, k, '#8a9bb8', lab));
-  // leader + inspected markers
-  const mark = (id, label, color, dashed) => {
-    const n = nodes.get(id); if (!n || !vis(n)) return;
-    const [x, y] = P.get(id), rr = n.r * n.scale + 7;
-    g.strokeStyle = color; g.lineWidth = 1.6; if (dashed) g.setLineDash([3, 3]);
-    g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
-    g.font = '700 9px "JetBrains Mono"'; const tw = g.measureText(label).width + 12;
-    const lx = clamp(x - tw / 2, 2, w - tw - 2), ly = y - rr - 22 < 2 ? y + rr + 4 : y - rr - 20;
-    g.fillStyle = color; g.beginPath(); g.roundRect(lx, ly, tw, 16, 4); g.fill();
-    g.fillStyle = C.white; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, lx + tw / 2, ly + 8.5);
-  };
-  if (hoverId && hoverId !== inspectId && hoverId !== leaderId) { const n = nodes.get(hoverId); if (n) mark(hoverId, 'g' + hoverId, C.mute, true); }
-  if (inspectId && inspectId !== leaderId) mark(inspectId, 'INSPECT g' + inspectId, C.royal, true);
-  if (leaderId) mark(leaderId, 'LIVE g' + leaderId, C.navy, false);
-  return P;
 }
 
 // ---------------- kelly ----------------

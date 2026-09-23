@@ -64,12 +64,14 @@
     </div>
   </section>
 
-  <section class="panel meshp">
-    <div class="ph"><h2>GENE POOL · LIVE STRATEGY GRAPH</h2><div class="phase"><b id="phaseA"></b><span id="phaseB"></span></div></div>
-    <div class="phs">POSITION = GENES · SIZE = RANK · CLICK A NODE TO INSPECT ITS GENOME</div>
-    <div class="legend" id="legend"></div>
-    <canvas id="mesh" class="grow" role="img" aria-label="Population graph grouped by species"></canvas>
-    <div class="pf"><span>ONE NODE = ONE CONFIG · LINE = PARENT → CHILD · RING = BIRTH / DEATH</span><span id="meshCount"></span></div>
+  <section class="panel gate">
+    <div class="ph"><h2>GATE BOARD · OUT-OF-SAMPLE SURVIVORS</h2><span class="r" id="gateCount"></span></div>
+    <div class="phs">EVERY ROW PASSED THE OOS GATE · CLICK A ROW TO INSPECT ITS GENOME · ESC RETURNS TO THE LEADER</div>
+    <div class="gtable gbtbl">
+      <div class="gbrow"><span>ID</span><span>SPECIES</span><span>FIT</span><span>OOS</span><span>DD</span><span>×</span><span>ROLE</span></div>
+      <div id="gateRows"></div>
+    </div>
+    <div class="pf"><span>SORTED BY TRAIN FITNESS · <b>FIT = OOS-BLIND TRAIN SCORE</b></span><span id="gateMeta"></span></div>
   </section>
 
   <section class="row trio">

@@ -20,7 +20,7 @@ const TAPE = {
   SOL: { candles: SOL_CANDLES, meta: SOL_META, snapshot: SOL_SNAP },
 };
 
-const { clamp, ease, fmt, money, hash } = D;
+const { clamp, ease, fmt, money } = D;
 const $ = (id) => document.getElementById(id);
 const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
 const setHTML = (el, s) => { if (el.__h !== s) { el.innerHTML = s; el.__h = s; } };
@@ -50,7 +50,7 @@ function loadTape(key) {
 }
 
 const cv = {};
-['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
+['logo', 'spark', 'ring', 'fit', 'kelly', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
 
 let st; // whole simulation state; rebuilt on restart
 
@@ -59,64 +59,19 @@ function restart(seed, warm = 0) {
   for (let k = 0; k < warm; k++) evo.step();
   st = {
     seed, evo, ct: CYCLE * 0.999, t: 0, rep: evo.last,
-    nodes: new Map(), edges: [], lineage: [],
     shown: null, pending: null, geneFlash: null,
-    inspect: null, hover: null, P: new Map(),
+    inspect: null,
   };
-  evo.pop.forEach((ind) => addNode(ind, -1));
-  rankNodes(); buildEdges();
   if (evo.leader) promote(evo.leader);
   $('seed').value = seed;
   syncUrl();
 }
 
-// ---------------- gene pool nodes ----------------
-function addNode(ind, born) {
-  const g = ind.genome, sp = D.SPECIES[g.family];
-  const nx = norm('lookback', g.lookback) * 0.6 + norm('entryZ', g.entryZ) * 0.4 - 0.5;
-  const ny = norm('spacing', g.spacing) * 0.5 + norm('tp', g.tp) * 0.5 - 0.5;
-  st.nodes.set(ind.id, {
-    id: ind.id, ind, fam: g.family, born, dies: null, ph: hash(ind.id) * 6.28,
-    // genes set the neighbourhood, a stable per-id scatter keeps near-clones readable
-    x: clamp(sp.cx + nx * 0.16 + (hash(ind.id * 3 + 1) - 0.5) * 0.22, 0.04, 0.96),
-    y: clamp(sp.cy + ny * 0.18 + (hash(ind.id * 7 + 2) - 0.5) * 0.26, 0.07, 0.95),
-    r: 3, halo: false, alpha: 1, scale: 1, dying: false,
-  });
-}
-
-function rankNodes() {
-  const N = st.evo.pop.length;
-  st.evo.pop.forEach((ind, rank) => {
-    const n = st.nodes.get(ind.id); if (!n) return;
-    n.r = 2.6 + 8 * Math.pow(1 - rank / N, 2.5); n.halo = rank < st.evo.E;
-  });
-}
-
-function buildEdges() {
-  const list = [...st.nodes.values()], edges = [];
-  list.forEach((n, i) => {
-    const same = list.filter((m) => m !== n && m.fam === n.fam)
-      .map((m) => [m.id, (m.x - n.x) ** 2 + (m.y - n.y) ** 2]).sort((a, b) => a[1] - b[1]);
-    same.slice(0, 2).forEach(([id]) => { if (n.id < id || !same.length) edges.push([n.id, id, false]); });
-    if (hash(n.id * 13) < 0.35) { const m = list[Math.floor(hash(n.id * 17 + i) * list.length)]; if (m && m.fam !== n.fam) edges.push([n.id, m.id, true]); }
-  });
-  st.edges = edges;
-}
-
 // ---------------- generations ----------------
 function startGeneration() {
-  for (const [id, n] of st.nodes) { if (n.dies !== null) st.nodes.delete(id); else n.born = -1; }
   const rep = st.evo.step();
-  st.rep = rep; st.lineage = [];
-  rep.immigrants.forEach((id) => addNode(st.evo.byId(id), STAGE * (1 + hash(id) * 0.85)));
-  rep.offspring.forEach((id) => {
-    const born = STAGE * (2 + hash(id) * 0.85), ind = st.evo.byId(id);
-    addNode(ind, born);
-    ind.parents.forEach((p, k) => { if (st.nodes.has(p)) st.lineage.push({ from: p, to: id, t0: born - 0.55 + k * 0.08 }); });
-  });
-  rep.died.forEach((id) => { const n = st.nodes.get(id); if (n) n.dies = STAGE * (4 + hash(id * 5) * 0.85); });
-  if (st.inspect && rep.died.includes(st.inspect)) st.inspect = null;
-  rankNodes(); buildEdges();
+  st.rep = rep;
+  if (st.inspect != null && !st.evo.byId(st.inspect)) st.inspect = null;
   st.pending = rep.promoted ? rep.leader : null;
   st.deployed = false;
 }
@@ -143,25 +98,6 @@ function update(dt) {
   if (st.ct >= CYCLE) { if (!st.deployed) deploy(); st.ct -= CYCLE; if (st.ct >= CYCLE) st.ct = 0; startGeneration(); }
 }
 
-function nodeStates() {
-  const ct = st.ct, births = [], deaths = [];
-  for (const n of st.nodes.values()) {
-    n.alpha = 1; n.scale = 1; n.dying = false;
-    if (n.born >= 0) {
-      const k = (ct - n.born) / 0.5;
-      if (k < 0) { n.alpha = 0; continue; }
-      n.scale = ease(k);
-      if (ct - n.born < 1.2) births.push([n.id, (ct - n.born) / 1.2, hash(n.id * 11) < 0.22 ? '+g' + n.id : '']);
-    }
-    if (n.dies !== null && ct >= n.dies) {
-      const k = (ct - n.dies) / 0.7;
-      n.dying = true; n.alpha = clamp(1 - k, 0, 1); n.scale = 1 - 0.4 * clamp(k, 0, 1);
-      if (k < 1.4) deaths.push([n.id, clamp((ct - n.dies) / 1.2, 0, 1), hash(n.id * 19) < 0.14 ? '✕ g' + n.id : '']);
-    }
-  }
-  return { births, deaths };
-}
-
 function stageText(stage) {
   const r = st.rep, evo = st.evo, off = r.offspring[0] ? evo.byId(r.offspring[0]) : null;
   const vol = volatility(S, S.n - 1) * 100;
@@ -175,7 +111,33 @@ function stageText(stage) {
   ][stage];
 }
 
-const PHASES = [[1, 'SCAN', 'reading the tape'], [1, 'SCAN', 'injecting new ideas'], [2, 'BREED', 'crossover + mutation'], [3, 'TEST', 'backtesting offspring'], [3, 'SELECT', 'the gate kills the weak'], [4, 'DEPLOY', 'leader genome takes the panels']];
+// Live table of every config that currently passes the out-of-sample gate.
+// Rows feed the Genome panel via st.inspect — the old gene-pool canvas in DOM form.
+function renderGateBoard() {
+  const evo = st.evo;
+  const pass = evo.pop.filter((x) => x.pass);
+  setText($('gateCount'), `${pass.length} / ${evo.N} PASSED`);
+  setText($('gateMeta'), `GEN ${st.rep.gen} · BORN ${fmt(evo.born)} · KILLED ${fmt(evo.killed)}`);
+  if (!pass.length) {
+    setHTML($('gateRows'), '<div class="gbempty">No config has passed the out-of-sample gate yet.</div>');
+    return;
+  }
+  const leadId = st.shown ? st.shown.id : -1;
+  setHTML($('gateRows'), pass.map((ind) => {
+    const g = ind.genome, col = D.SPECIES[g.family].color;
+    const role = ind.id === leadId ? 'LEADER' : ind.id === st.inspect ? 'INSPECT' : 'PASS';
+    return (
+      `<div class="gbdata${ind.id === st.inspect ? ' sel' : ''}${ind.id === leadId ? ' lead' : ''}" data-id="${ind.id}" role="button" tabindex="0">` +
+      `<span class="fid"><i style="background:${col}"></i>g${ind.id}</span>` +
+      `<span class="fsp">${FAMILIES[g.family]}</span>` +
+      `<span>${ind.fit.toFixed(4)}</span>` +
+      `<span class="${ind.val.ret >= 0 ? 'pos' : 'neg'}">${pct(ind.val.ret, 1)}</span>` +
+      `<span>${(ind.val.maxDD * 100).toFixed(1)}%</span>` +
+      `<span>${ind.val.trades}</span>` +
+      `<span class="grole">${role}</span></div>`
+    );
+  }).join(''));
+}
 
 function render() {
   const evo = st.evo, rep = st.rep, ct = st.ct, stage = Math.min(5, Math.floor(ct / STAGE)), sp = (ct - stage * STAGE) / STAGE;
@@ -202,27 +164,21 @@ function render() {
   setText($('fDelta'), (cur.best - old.best >= 0 ? '+' : '−') + Math.abs(cur.best - old.best).toFixed(4));
   setText($('stName'), D.STAGES[stage]);
   setText($('stText'), stageText(stage));
-  // mesh
-  const ph = PHASES[stage];
-  setText($('phaseA'), `PHASE ${ph[0]} / 4 · ${ph[1]}`);
-  setText($('phaseB'), ph[2]);
-  const { births, deaths } = nodeStates();
-  const counts = [0, 0, 0, 0];
-  for (const n of st.nodes.values()) if (!n.dying && n.alpha > 0) counts[n.fam]++;
-  setHTML($('legend'), FAMILIES.map((f, i) => `<div><i style="background:${D.SPECIES[i].color}"></i>${f} <em>${counts[i]}</em></div>`).join(''));
-  setText($('meshCount'), `GEN ${rep.gen} · BORN ${fmt(evo.born)} · KILLED ${fmt(evo.killed)}`);
-  st.P = D.drawMesh(cv.mesh, { nodes: st.nodes, edges: st.edges, lineage: st.lineage, ct, t, leaderId: st.shown && st.shown.id, inspectId: st.inspect, hoverId: st.hover, births, deaths });
+  renderGateBoard();
   renderGenome(); renderSelection(stage, sp); renderKelly(t);
 }
 
 function renderGenome() {
-  const n = st.inspect && st.nodes.get(st.inspect);
-  const ind = n ? n.ind : st.shown;
-  setText($('genomeTitle'), n ? 'GENOME · INSPECTING' : 'GENOME · LIVE LEADER');
-  setText($('genomeSub'), n ? 'CLICK EMPTY SPACE OR PRESS ESC TO RETURN TO THE LEADER' : 'DNA OF THE CURRENT LEADER · CHOSEN BY THE OUT-OF-SAMPLE GATE');
+  let ind = st.shown, inspecting = false;
+  if (st.inspect != null) {
+    const x = st.evo.byId(st.inspect);
+    if (x) { ind = x; inspecting = true; } else st.inspect = null;
+  }
+  setText($('genomeTitle'), inspecting ? 'GENOME · INSPECTING' : 'GENOME · LIVE LEADER');
+  setText($('genomeSub'), inspecting ? 'PRESS ESC OR CLICK THE ROW AGAIN TO RETURN TO THE LEADER' : 'DNA OF THE CURRENT LEADER · CHOSEN BY THE OUT-OF-SAMPLE GATE');
   if (!ind) { setHTML($('genes'), '<div class="sig">No config has passed the out-of-sample gate yet.</div>'); setText($('genomeId'), ''); setHTML($('genomeFoot'), ''); return; }
   setText($('genomeId'), `g${ind.id} · BORN GEN ${ind.gen}`);
-  const flash = !n && st.geneFlash && st.t - st.geneFlash.t < 2.2 ? st.geneFlash.keys : [];
+  const flash = !inspecting && st.geneFlash && st.t - st.geneFlash.t < 2.2 ? st.geneFlash.keys : [];
   setHTML($('genes'), GENES.map((G) => {
     const v = ind.genome[G.key], on = Math.round((G.key === 'family' ? (v + 1) / 4 : norm(G.key, v)) * 22);
     let segs = ''; for (let s = 0; s < 22; s++) segs += s < on ? '<i class="on"></i>' : '<i></i>';
@@ -459,6 +415,23 @@ function step() {
 $('bPlay').onclick = () => setRunning(!running);
 $('bStep').onclick = step;
 $('fwRefresh').onclick = () => refreshForward();
+function pickGateRow(e) {
+  const row = e.target.closest('[data-id]');
+  return row ? +row.dataset.id : null;
+}
+function inspectGateRow(e) {
+  const id = pickGateRow(e);
+  if (id == null) return;
+  st.inspect = st.inspect === id ? null : id; // click again returns to the leader
+  renderGateBoard();
+  renderGenome();
+}
+$('gateRows').addEventListener('click', inspectGateRow);
+$('gateRows').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  inspectGateRow(e);
+});
 $('fwRows').addEventListener('click', (e) => {
   const row = e.target.closest('[data-idx]');
   if (!row) return;
@@ -490,23 +463,9 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.key === ' ') { e.preventDefault(); setRunning(!running); }
   else if (e.key === 'ArrowRight') step();
-  else if (e.key === 'Escape') st.inspect = null;
+  else if (e.key === 'Escape') { st.inspect = null; renderGateBoard(); renderGenome(); }
   else if ('1234'.includes(e.key)) setSpeed([1, 2, 4, 8][+e.key - 1]);
 });
-
-function pick(e) {
-  const r = cv.mesh.el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-  let best = null, bd = Infinity;
-  for (const [id, [px, py]] of st.P) {
-    const n = st.nodes.get(id); if (!n || n.alpha < 0.3) continue;
-    const d = Math.hypot(px - x, py - y);
-    if (d < n.r * n.scale + 7 && d < bd) { bd = d; best = id; }
-  }
-  return best;
-}
-cv.mesh.el.addEventListener('pointermove', (e) => { st.hover = pick(e); cv.mesh.el.classList.toggle('hand', !!st.hover); });
-cv.mesh.el.addEventListener('pointerleave', () => { st.hover = null; });
-cv.mesh.el.addEventListener('click', (e) => { st.inspect = pick(e); });
 
 const initKey = (q.get('sym') || 'BTC').toUpperCase();
 loadTape(TAPE[initKey] ? initKey : 'BTC');

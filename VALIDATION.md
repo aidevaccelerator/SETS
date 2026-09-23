@@ -18,7 +18,7 @@
 ## Browser checks
 
 - Served with `python -m http.server --directory dist`. All modules, data, fonts and icons return 200. The root `index.html` forwards to `dist/` for GitHub Pages.
-- Desktop, 1280 × 900: all panels render — evolution, gene pool, genome/selection/Kelly, forward test with cohort inspector. Inspect-on-click (gene-pool node g12 → "GENOME · INSPECTING"), cohort-row click (order grid + forward fills), pause, step, speed and the BTC/ETH/SOL toggle were exercised. No console errors on any market.
+- Desktop, 1280 × 900: all panels render — evolution, gate board, genome/selection/Kelly, forward test with cohort inspector. Inspect-on-click (gate-board row → "GENOME · INSPECTING", Esc returns to leader), cohort-row click (order grid + forward fills), pause, step, speed and the BTC/ETH/SOL toggle were exercised. No console errors on any market.
 - Phone, 390 × 844: panels stack and `scrollWidth` equals the viewport (390 px), so nothing scrolls sideways.
 - The README screenshots and GIFs were captured from the running app (seed 2026, 40 generations warmed up) with headless Chrome. No page errors were reported during capture.
 
