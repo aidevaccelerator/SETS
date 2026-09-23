@@ -5,7 +5,9 @@ import { CANDLES, META } from './data/candles.js';
 import { makeSeries, volatility } from './engine/series.js';
 import { GridBot, signal, FAMILIES } from './engine/bot.js';
 import { Evolution, GENES } from './engine/evolution.js';
+import { fetchCandles, runForward } from './engine/forward.js';
 import * as D from './ui/draw.js';
+import { drawForward, FW_COLORS, BH_COLOR } from './ui/forward.js';
 
 const { clamp, ease, fmt, money, hash } = D;
 const $ = (id) => document.getElementById(id);
@@ -21,7 +23,7 @@ const S = makeSeries(CANDLES);
 const q = new URLSearchParams(location.search);
 
 const cv = {};
-['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'chart'].forEach((id) => { cv[id] = D.sized($(id)); });
+['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'chart', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
 
 let st; // whole simulation state; rebuilt on restart
 
@@ -341,7 +343,115 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (running) update(dt * speed);
   render();
+  renderForward();
   requestAnimationFrame(frame);
+}
+
+// ---------------- forward test (frozen cohort on live bars) ----------------
+let snapshot = null, fw = { status: 'loading', at: 0 }, fwBusy = false, SNAPSHOT_ERR = null;
+
+async function loadSnapshot() {
+  try {
+    const m = await import('./data/snapshot.js');
+    snapshot = m.SNAPSHOT;
+  } catch (e) {
+    SNAPSHOT_ERR = e;
+    fw = { status: 'no snapshot', err: String(e.message || e), at: 0 };
+  }
+}
+
+async function refreshForward() {
+  if (fwBusy) return;
+  fwBusy = true;
+  if (!snapshot && !SNAPSHOT_ERR) await loadSnapshot();
+  if (!snapshot) { fwBusy = false; renderForward(); return; }
+  try {
+    fw = { ...fw, status: 'fetching…' };
+    const warmup = snapshot.warmupBars || 220;
+    const start = snapshot.forwardFrom - warmup * 3600;
+    const [live, bundled] = await Promise.all([
+      fetchCandles({ symbol: snapshot.symbol, startTime: start * 1000 }).catch(() => []),
+      Promise.resolve(CANDLES.filter((c) => c[0] >= start)),
+    ]);
+    // prefer live bars; fall back to bundled candles past T0 if the API is unreachable
+    const past = CANDLES.filter((c) => c[0] >= snapshot.forwardFrom).length;
+    const candles = live.length ? mergeCandles(bundled, live) : bundled;
+    const run = runForward(snapshot, candles, START_CASH);
+    fw = {
+      status: live.length ? 'live' : past ? 'bundled only' : 'waiting',
+      run, at: Date.now(), symbol: snapshot.symbol,
+      err: live.length ? null : 'Binance unreachable — showing bundled bars only',
+    };
+  } catch (e) {
+    fw = { ...fw, status: 'error', err: String(e.message || e), at: Date.now() };
+  }
+  fwBusy = false;
+  renderForward();
+}
+
+// keep bundled warmup bars and splice live bars on top (live wins on overlap)
+function mergeCandles(base, live) {
+  const byT = new Map();
+  for (const c of base) byT.set(c[0], c);
+  for (const c of live) byT.set(c[0], c);
+  return [...byT.values()].sort((a, b) => a[0] - b[0]);
+}
+
+function utcTime(sec) {
+  const d = new Date(sec * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`;
+}
+
+function renderForward() {
+  const stEl = $('fwStatus');
+  if (!snapshot && SNAPSHOT_ERR) {
+    setText(stEl, 'NO SNAPSHOT');
+    setHTML($('fwSub'), 'run <b>node tools/make_snapshot.mjs</b> to freeze a cohort');
+    drawForward(cv.fwChart, { curve: null });
+    return;
+  }
+  if (!snapshot || !fw.run) {
+    setText(stEl, fw.status === 'error' ? 'ERROR' : 'CONNECTING…');
+    if (fw.err) setHTML($('fwSub'), fw.err);
+    if (!fw.run) drawForward(cv.fwChart, { curve: null });
+    return;
+  }
+  const run = fw.run;
+  const badge = { live: 'LIVE', fetching: 'FETCHING…', waiting: 'WAITING FOR BAR 1', error: 'ERROR', 'bundled only': 'OFFLINE · BUNDLED' }[fw.status] || fw.status.toUpperCase();
+  setText(stEl, badge);
+  setHTML(
+    $('fwSub'),
+    `FROZEN GEN ${snapshot.gen} · SEED ${snapshot.seed} · ${snapshot.survivors.length} SURVIVORS · T0 ${utcTime(snapshot.forwardFrom)} UTC · NO RE-EVOLUTION${fw.err ? ' · ' + fw.err : ''}`,
+  );
+  setText($('fwSince'), run.bars > 0 ? `FORWARD SINCE ${utcTime(run.series.time[run.fromIdx])} UTC · T0 ${utcTime(snapshot.forwardFrom)} UTC` : `T0 ${utcTime(snapshot.forwardFrom)} UTC · NO BARS YET`);
+  setText($('fwBars'), run.bars ? `${fmt(run.bars)} HOURLY BARS · UPDATED ${new Date(fw.at).toLocaleTimeString('en-GB')}` : '');
+  setText($('fwPrice'), run.bars ? `${META.symbol} ${money(run.price)} · B&H ENTRY ${money(run.open)}` : '');
+  drawForward(cv.fwChart, { curve: run.curve, startCash: run.startCash, runners: run.runners, bhColor: BH_COLOR });
+  // cohort table
+  const rows = run.runners.map((r, k) => {
+    const bot = r.bot, col = FW_COLORS[k % FW_COLORS.length];
+    const eq = r.equity ?? run.startCash;
+    const ret = eq / run.startCash - 1;
+    const dd = bot.maxDD;
+    const state = bot.inPos ? `IN POS ${bot.levels.filter((L) => L.filled).length}/${bot.levels.length}` : 'FLAT';
+    return (
+      `<div class="fwdata${bot.inPos ? ' inpos' : ''}">` +
+      `<span class="fid"><i style="background:${col}"></i>g${r.sur.id}</span>` +
+      `<span class="fsp">${r.sur.family}</span>` +
+      `<span class="${ret >= 0 ? 'pos' : 'neg'}">${pct(ret, 2)}</span>` +
+      `<span>${(dd * 100).toFixed(1)}%</span>` +
+      `<span>${bot.trades.length}</span>` +
+      `<span>${state}</span></div>`
+    );
+  });
+  const bh = run.bars ? run.bh / run.startCash - 1 : 0;
+  rows.push(
+    `<div class="fwdata"><span class="fid"><i style="background:${BH_COLOR}"></i>B&H</span>` +
+      `<span class="fsp">BUY AND HOLD</span>` +
+      `<span class="${bh >= 0 ? 'pos' : 'neg'}">${run.bars ? pct(bh, 2) : '—'}</span>` +
+      `<span>—</span><span>1</span><span>HELD</span></div>`,
+  );
+  setHTML($('fwRows'), rows.join(''));
 }
 
 // ---------------- controls ----------------
@@ -363,6 +473,7 @@ function step() {
 
 $('bPlay').onclick = () => setRunning(!running);
 $('bStep').onclick = step;
+$('fwRefresh').onclick = () => refreshForward();
 document.querySelectorAll('[data-speed]').forEach((b) => { b.onclick = () => setSpeed(+b.dataset.speed); });
 $('bSeed').onclick = () => restart(clamp(Math.round(+$('seed').value) || 1, 1, 999999));
 $('bRand').onclick = () => restart(1 + Math.floor(Math.random() * 999999));
@@ -394,7 +505,15 @@ $('sym').textContent = META.symbol;
 setSpeed(speed);
 setRunning(running);
 restart(clamp(parseInt(q.get('seed'), 10) || 2026, 1, 999999), clamp(parseInt(q.get('warm'), 10) || 0, 0, 500));
+refreshForward();
+setInterval(refreshForward, 10 * 60 * 1000); // keep the forward tape fresh while the tab is open
 requestAnimationFrame(frame);
 
 // small read-only hook for debugging and automated checks
-window.SETS = { get state() { return st; }, step, setSpeed, setRunning, restart, advance(dt) { update(dt); render(); } };
+window.SETS = {
+  get state() { return st; },
+  get forward() { return fw; },
+  get snapshot() { return snapshot; },
+  step, setSpeed, setRunning, restart, advance(dt) { update(dt); render(); },
+  refreshForward,
+};

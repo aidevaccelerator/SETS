@@ -120,8 +120,26 @@
     </div>
   </section>
 
+  <section class="row fwd">
+    <div class="panel fwdp">
+      <div class="ph"><h2>FORWARD TEST · FROZEN COHORT vs <span class="acc">BUY &amp; HOLD</span></h2><span class="r" id="fwStatus">CONNECTING…</span></div>
+      <div class="phs" id="fwSub">GENOMES FROZEN AT T0 · NO RE-EVOLUTION · ONLY NEW BARS COUNT</div>
+      <canvas id="fwChart" class="grow" role="img" aria-label="Forward equity curves of frozen survivors versus buy and hold"></canvas>
+      <div class="pf"><span id="fwSince">—</span><span id="fwBars"></span></div>
+    </div>
+    <div class="panel fwt">
+      <div class="ph"><h2>COHORT · LIVE PAPER</h2><button id="fwRefresh" class="btn" title="Refetch candles and replay">REFRESH</button></div>
+      <div class="phs">EACH ROW IS ONE FROZEN GENOME ON LIVE HOURLY CANDLES</div>
+      <div class="gtable fwtbl">
+        <div class="gth fwrow"><span>ID</span><span>SPECIES</span><span>RET</span><span>DD</span><span>×</span><span>STATE</span></div>
+        <div id="fwRows"></div>
+      </div>
+      <div class="pf"><span>ENTRY FEE 0.04% · SAME <b>GridBot</b> AS THE BACKTEST</span><span id="fwPrice"></span></div>
+    </div>
+  </section>
+
   <footer class="foot">
-    Paper trading on historical Binance candles. No exchange connection, no keys, no real orders. Not financial advice.
+    Paper trading on historical Binance candles + live forward bars from Binance's public API. No exchange connection, no keys, no real orders. Not financial advice.
     · MIT licensed
   </footer>
 </main>
