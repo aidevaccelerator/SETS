@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SETS MACHINE · Self Evolving Trading System</title>
-<meta name="description" content="A genetic algorithm breeds grid-DCA strategies on real BTC candles, kills what fails out-of-sample and paper-trades the survivor. Live, in your browser.">
+<meta name="description" content="A genetic algorithm breeds grid-DCA strategies on real BTC, ETH and SOL candles, kills what fails out-of-sample and paper-trades the survivors on live bars. Free, in your browser.">
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -32,6 +32,9 @@
     <button id="bStep" class="btn" title="Next generation (→)">STEP ›</button>
     <div class="seg" role="group" aria-label="Speed">
       <button class="btn" data-speed="1">1×</button><button class="btn" data-speed="2">2×</button><button class="btn" data-speed="4">4×</button><button class="btn" data-speed="8">8×</button>
+    </div>
+    <div class="seg" role="group" aria-label="Market">
+      <button class="btn" data-sym="BTC" title="BTCUSDT">BTC</button><button class="btn" data-sym="ETH" title="ETHUSDT">ETH</button><button class="btn" data-sym="SOL" title="SOLUSDT">SOL</button>
     </div>
     <label class="seed">SEED <input id="seed" type="number" min="1" max="999999" inputmode="numeric"></label>
     <button id="bSeed" class="btn" title="Restart with this seed">RESTART</button>

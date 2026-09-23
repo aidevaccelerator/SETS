@@ -5,14 +5,24 @@ import { GridBot, backtest, signal, FEE } from '../dist/engine/bot.js';
 import { Evolution, GENES, randomGenome, mutate, passesGate } from '../dist/engine/evolution.js';
 import { mulberry32 } from '../dist/engine/rng.js';
 import { CANDLES, META } from '../dist/data/candles.js';
+import { CANDLES as ETH_C, META as ETH_M } from '../dist/data/candles.ETHUSDT.js';
+import { CANDLES as SOL_C, META as SOL_M } from '../dist/data/candles.SOLUSDT.js';
 
 const flat = (n, p = 100) => Array.from({ length: n }, (_, i) => [i * 3600, p, p, p, p, 1]);
 
-test('bundled data is sane', () => {
-  assert.equal(CANDLES.length, META.count);
-  for (let i = 1; i < CANDLES.length; i++) assert.equal(CANDLES[i][0] - CANDLES[i - 1][0], 3600, `gap at ${i}`);
-  for (const [, o, h, l, c] of CANDLES) { assert.ok(h >= Math.max(o, c) && l <= Math.min(o, c) && l > 0); }
-});
+for (const [name, candles, meta] of [
+  ['BTCUSDT', CANDLES, META],
+  ['ETHUSDT', ETH_C, ETH_M],
+  ['SOLUSDT', SOL_C, SOL_M],
+]) {
+  test(`bundled data is sane: ${name}`, () => {
+    assert.equal(meta.symbol, name);
+    assert.equal(candles.length, meta.count);
+    assert.ok(candles.length >= 2000, 'enough bars to evolve on');
+    for (let i = 1; i < candles.length; i++) assert.equal(candles[i][0] - candles[i - 1][0], 3600, `gap at ${i}`);
+    for (const [, o, h, l, c] of candles) { assert.ok(h >= Math.max(o, c) && l <= Math.min(o, c) && l > 0); }
+  });
+}
 
 test('rolling stats are causal and correct', () => {
   const c = flat(50); c[30][4] = 130; c[30][2] = 130;

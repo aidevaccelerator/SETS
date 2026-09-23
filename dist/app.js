@@ -1,13 +1,24 @@
 // SETS MACHINE controller: runs the evolution, animates each generation stage by stage,
 // and paper-trades the current leader on the out-of-sample part of the tape.
 
-import { CANDLES, META } from './data/candles.js';
+import { CANDLES as BTC_CANDLES, META as BTC_META } from './data/candles.BTCUSDT.js';
+import { CANDLES as ETH_CANDLES, META as ETH_META } from './data/candles.ETHUSDT.js';
+import { CANDLES as SOL_CANDLES, META as SOL_META } from './data/candles.SOLUSDT.js';
+import { SNAPSHOT as BTC_SNAP } from './data/snapshot.BTCUSDT.js';
+import { SNAPSHOT as ETH_SNAP } from './data/snapshot.ETHUSDT.js';
+import { SNAPSHOT as SOL_SNAP } from './data/snapshot.SOLUSDT.js';
 import { makeSeries, volatility } from './engine/series.js';
 import { GridBot, signal, FAMILIES } from './engine/bot.js';
 import { Evolution, GENES } from './engine/evolution.js';
 import { fetchCandles, runForward } from './engine/forward.js';
 import * as D from './ui/draw.js';
 import { drawForward, FW_COLORS, BH_COLOR } from './ui/forward.js';
+
+const TAPE = {
+  BTC: { candles: BTC_CANDLES, meta: BTC_META, snapshot: BTC_SNAP },
+  ETH: { candles: ETH_CANDLES, meta: ETH_META, snapshot: ETH_SNAP },
+  SOL: { candles: SOL_CANDLES, meta: SOL_META, snapshot: SOL_SNAP },
+};
 
 const { clamp, ease, fmt, money, hash } = D;
 const $ = (id) => document.getElementById(id);
@@ -19,8 +30,23 @@ const tapeTime = (sec) => { const d = new Date(sec * 1000); return `${String(d.g
 const STAGE = 0.8, CYCLE = STAGE * 6, BAR_T = 0.4, START_CASH = 10000;
 const GI = Object.fromEntries(GENES.map((G) => [G.key, G]));
 const norm = (key, v) => (v - GI[key].min) / (GI[key].max - GI[key].min);
-const S = makeSeries(CANDLES);
 const q = new URLSearchParams(location.search);
+
+let symKey, CANDLES, META, S, snapshot; // current tape — rebound by loadTape()
+let fw = { status: 'loading', at: 0 }, fwBusy = false, fwQueued = false;
+
+function loadTape(key) {
+  const t = TAPE[key] || TAPE.BTC;
+  symKey = TAPE[key] ? key : 'BTC';
+  CANDLES = t.candles;
+  META = t.meta;
+  snapshot = t.snapshot;
+  S = makeSeries(CANDLES);
+  fw = { status: 'loading', at: 0 };
+  document.querySelectorAll('[data-sym]').forEach((b) => b.classList.toggle('on', b.dataset.sym === symKey));
+  $('sym').textContent = META.symbol;
+  setText($('meta'), `${META.symbol} ${META.interval} · ${fmt(META.count)} candles · ${tapeTime(META.from)} → ${tapeTime(META.to)} UTC · train 70% / out-of-sample 30%`);
+}
 
 const cv = {};
 ['logo', 'spark', 'ring', 'fit', 'mesh', 'kelly', 'chart', 'fwChart'].forEach((id) => { cv[id] = D.sized($(id)); });
@@ -298,7 +324,7 @@ function renderTrade() {
   }
   const price = D.drawChart(cv.chart, { s: S, from: st.evo.valFrom, i, frac: p.frac, bot, preview, marks: st.marks, empty: bot ? '' : 'WAITING FOR THE FIRST SURVIVOR' });
   const o = S.open[i], c = price;
-  setHTML($('ohlc'), `<em>${tapeTime(S.time[i])} UTC</em>  <em>O</em>${money(o)}  <em>C</em>${money(c)}  <em>Δ</em>${pct(c / o - 1, 2)}  <em>VOL</em>${fmt(S.volume[i] * p.frac)} BTC`);
+  setHTML($('ohlc'), `<em>${tapeTime(S.time[i])} UTC</em>  <em>O</em>${money(o)}  <em>C</em>${money(c)}  <em>Δ</em>${pct(c / o - 1, 2)}  <em>VOL</em>${fmt(S.volume[i] * p.frac)} ${META.symbol.slice(0, -4)}`);
   setText($('chSym'), META.symbol);
   if (!bot) { setText($('chCfg'), 'NO LEADER YET'); setText($('chState'), 'FLAT'); }
   else {
@@ -348,44 +374,33 @@ function frame(now) {
 }
 
 // ---------------- forward test (frozen cohort on live bars) ----------------
-let snapshot = null, fw = { status: 'loading', at: 0 }, fwBusy = false, SNAPSHOT_ERR = null;
-
-async function loadSnapshot() {
-  try {
-    const m = await import('./data/snapshot.js');
-    snapshot = m.SNAPSHOT;
-  } catch (e) {
-    SNAPSHOT_ERR = e;
-    fw = { status: 'no snapshot', err: String(e.message || e), at: 0 };
-  }
-}
-
 async function refreshForward() {
-  if (fwBusy) return;
+  if (!snapshot) return;
+  if (fwBusy) { fwQueued = true; return; }
   fwBusy = true;
-  if (!snapshot && !SNAPSHOT_ERR) await loadSnapshot();
-  if (!snapshot) { fwBusy = false; renderForward(); return; }
+  const myKey = symKey, mySnap = snapshot;
   try {
-    fw = { ...fw, status: 'fetching…' };
-    const warmup = snapshot.warmupBars || 220;
-    const start = snapshot.forwardFrom - warmup * 3600;
+    fw = { ...fw, status: 'fetching…', run: null };
+    const warmup = mySnap.warmupBars || 220;
+    const start = mySnap.forwardFrom - warmup * 3600;
     const [live, bundled] = await Promise.all([
-      fetchCandles({ symbol: snapshot.symbol, startTime: start * 1000 }).catch(() => []),
+      fetchCandles({ symbol: mySnap.symbol, startTime: start * 1000 }).catch(() => []),
       Promise.resolve(CANDLES.filter((c) => c[0] >= start)),
     ]);
-    // prefer live bars; fall back to bundled candles past T0 if the API is unreachable
-    const past = CANDLES.filter((c) => c[0] >= snapshot.forwardFrom).length;
+    const past = bundled.filter((c) => c[0] >= mySnap.forwardFrom).length;
     const candles = live.length ? mergeCandles(bundled, live) : bundled;
-    const run = runForward(snapshot, candles, START_CASH);
+    const run = runForward(mySnap, candles, START_CASH);
+    if (symKey !== myKey) return; // market switched mid-fetch — a queued run owns the UI now
     fw = {
       status: live.length ? 'live' : past ? 'bundled only' : 'waiting',
-      run, at: Date.now(), symbol: snapshot.symbol,
+      run, at: Date.now(), symbol: mySnap.symbol,
       err: live.length ? null : 'Binance unreachable — showing bundled bars only',
     };
   } catch (e) {
-    fw = { ...fw, status: 'error', err: String(e.message || e), at: Date.now() };
+    if (symKey === myKey) fw = { ...fw, status: 'error', err: String(e.message || e), at: Date.now() };
   }
   fwBusy = false;
+  if (fwQueued) { fwQueued = false; refreshForward(); return; }
   renderForward();
 }
 
@@ -404,7 +419,7 @@ function utcTime(sec) {
 
 function renderForward() {
   const stEl = $('fwStatus');
-  if (!snapshot && SNAPSHOT_ERR) {
+  if (!snapshot) {
     setText(stEl, 'NO SNAPSHOT');
     setHTML($('fwSub'), 'run <b>node tools/make_snapshot.mjs</b> to freeze a cohort');
     drawForward(cv.fwChart, { curve: null });
@@ -449,7 +464,7 @@ function renderForward() {
     `<div class="fwdata"><span class="fid"><i style="background:${BH_COLOR}"></i>B&H</span>` +
       `<span class="fsp">BUY AND HOLD</span>` +
       `<span class="${bh >= 0 ? 'pos' : 'neg'}">${run.bars ? pct(bh, 2) : '—'}</span>` +
-      `<span>—</span><span>1</span><span>HELD</span></div>`,
+      `<span>—</span><span>${run.bars ? 1 : 0}</span><span>${run.bars ? 'HELD' : 'WAITING'}</span></div>`,
   );
   setHTML($('fwRows'), rows.join(''));
 }
@@ -458,6 +473,7 @@ function renderForward() {
 function syncUrl() {
   const u = new URL(location.href);
   u.searchParams.set('seed', st.seed);
+  u.searchParams.set('sym', symKey);
   if (speed !== 1) u.searchParams.set('speed', speed); else u.searchParams.delete('speed');
   u.searchParams.delete('warm');
   history.replaceState(null, '', u);
@@ -475,6 +491,15 @@ $('bPlay').onclick = () => setRunning(!running);
 $('bStep').onclick = step;
 $('fwRefresh').onclick = () => refreshForward();
 document.querySelectorAll('[data-speed]').forEach((b) => { b.onclick = () => setSpeed(+b.dataset.speed); });
+document.querySelectorAll('[data-sym]').forEach((b) => {
+  b.onclick = () => {
+    const key = b.dataset.sym;
+    if (key === symKey || !TAPE[key]) return;
+    loadTape(key);
+    restart(st ? st.seed : 2026, 0);
+    refreshForward();
+  };
+});
 $('bSeed').onclick = () => restart(clamp(Math.round(+$('seed').value) || 1, 1, 999999));
 $('bRand').onclick = () => restart(1 + Math.floor(Math.random() * 999999));
 $('seed').onkeydown = (e) => { if (e.key === 'Enter') $('bSeed').click(); };
@@ -500,8 +525,8 @@ cv.mesh.el.addEventListener('pointermove', (e) => { st.hover = pick(e); cv.mesh.
 cv.mesh.el.addEventListener('pointerleave', () => { st.hover = null; });
 cv.mesh.el.addEventListener('click', (e) => { st.inspect = pick(e); });
 
-setText($('meta'), `${META.symbol} ${META.interval} · ${fmt(META.count)} candles · ${tapeTime(META.from)} → ${tapeTime(META.to)} UTC · train 70% / out-of-sample 30%`);
-$('sym').textContent = META.symbol;
+const initKey = (q.get('sym') || 'BTC').toUpperCase();
+loadTape(TAPE[initKey] ? initKey : 'BTC');
 setSpeed(speed);
 setRunning(running);
 restart(clamp(parseInt(q.get('seed'), 10) || 2026, 1, 999999), clamp(parseInt(q.get('warm'), 10) || 0, 0, 500));
@@ -514,6 +539,7 @@ window.SETS = {
   get state() { return st; },
   get forward() { return fw; },
   get snapshot() { return snapshot; },
+  get symbol() { return symKey; },
   step, setSpeed, setRunning, restart, advance(dt) { update(dt); render(); },
   refreshForward,
 };

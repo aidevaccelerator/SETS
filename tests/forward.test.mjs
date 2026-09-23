@@ -4,6 +4,8 @@ import { makeSeries } from '../dist/engine/series.js';
 import { GridBot, FEE } from '../dist/engine/bot.js';
 import { runForward, fetchCandles } from '../dist/engine/forward.js';
 import { SNAPSHOT } from '../dist/data/snapshot.js';
+import { SNAPSHOT as ETH_SNAP } from '../dist/data/snapshot.ETHUSDT.js';
+import { SNAPSHOT as SOL_SNAP } from '../dist/data/snapshot.SOLUSDT.js';
 import { GENES } from '../dist/engine/evolution.js';
 
 const hourly = (from, n, path) =>
@@ -12,23 +14,29 @@ const hourly = (from, n, path) =>
     return [(from + i * 3600) * 1000 / 1000, p, p * 1.01, p * 0.99, p, 1];
   });
 
-test('snapshot is well formed and genomes stay in bounds', () => {
-  assert.ok(SNAPSHOT.version === 1);
-  assert.ok(SNAPSHOT.survivors.length >= 1);
-  assert.ok(SNAPSHOT.forwardFrom > SNAPSHOT.bundledTo);
-  assert.equal(SNAPSHOT.forwardFrom, SNAPSHOT.bundledTo + 3600);
-  for (const s of SNAPSHOT.survivors) {
-    for (const G of GENES) {
-      const v = s.genome[G.key];
-      assert.ok(v >= G.min && v <= G.max, `${s.id}.${G.key}`);
-      if (G.int) assert.ok(Number.isInteger(v), `${s.id}.${G.key}`);
+for (const [name, snap] of [
+  ['BTCUSDT', SNAPSHOT],
+  ['ETHUSDT', ETH_SNAP],
+  ['SOLUSDT', SOL_SNAP],
+]) {
+  test(`snapshot is well formed and genomes stay in bounds: ${name}`, () => {
+    assert.equal(snap.version, 1);
+    assert.equal(snap.symbol, name);
+    assert.ok(snap.survivors.length >= 1);
+    assert.ok(snap.forwardFrom > snap.bundledTo);
+    assert.equal(snap.forwardFrom, snap.bundledTo + 3600);
+    for (const s of snap.survivors) {
+      for (const G of GENES) {
+        const v = s.genome[G.key];
+        assert.ok(v >= G.min && v <= G.max, `${s.id}.${G.key}`);
+        if (G.int) assert.ok(Number.isInteger(v), `${s.id}.${G.key}`);
+      }
+      assert.ok(s.train && s.val && Number.isFinite(s.fit));
     }
-    assert.ok(s.train && s.val && Number.isFinite(s.fit));
-  }
-  // unique ids
-  const ids = new Set(SNAPSHOT.survivors.map((s) => s.id));
-  assert.equal(ids.size, SNAPSHOT.survivors.length);
-});
+    const ids = new Set(snap.survivors.map((s) => s.id));
+    assert.equal(ids.size, snap.survivors.length);
+  });
+}
 
 test('runForward: empty when no bars past T0', () => {
   const snap = { ...SNAPSHOT, forwardFrom: 2_000_000_000 };

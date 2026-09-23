@@ -17,7 +17,10 @@ export const lerp = (a, b, k) => a + (b - a) * k;
 export const ease = (x) => { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
 export const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 export const fmt = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-export const money = (n) => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
+export const money = (n) => {
+  const a = Math.abs(n);
+  return (n < 0 ? '−$' : '$') + (a < 1000 ? a.toFixed(2) : fmt(a));
+};
 export const hash = (k) => { let x = Math.imul(k ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35); x ^= x >>> 16; return (x >>> 0) / 4294967296; };
 
 // Keeps a canvas sharp at any size / DPR.
